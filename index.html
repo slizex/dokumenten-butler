@@ -1,0 +1,1067 @@
+<!doctype html>
+<html lang="de">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
+<meta name="theme-color" content="#1d4ed8">
+<title>Dokumenten-Butler</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap">
+<link rel="manifest" href="manifest.webmanifest">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="default">
+<meta name="apple-mobile-web-app-title" content="Butler">
+<link rel="apple-touch-icon" href="icon-192.png">
+<style>
+/* ===== Dokumenten-Butler — Clean / Minimal (Inter, Sidebar-Dashboard) ===== */
+*{box-sizing:border-box}
+[hidden]{display:none!important}
+:root{
+ --bg:#fafafa;--panel:#ffffff;--panel2:#f4f4f5;
+ --fg:#09090b;--muted:#71717a;--muted2:#a1a1aa;
+ --border:#e7e7ea;--border2:#d4d4d8;
+ --accent:#1d4ed8;--accent-fg:#ffffff;--gold:#b45309;
+ --pos:#16a34a;--warn:#d97706;--neg:#dc2626;
+ --radius:12px;--radius-sm:8px;
+ --shadow-sm:0 1px 2px rgba(9,9,11,.05);
+ --shadow:0 1px 3px rgba(9,9,11,.09),0 1px 2px rgba(9,9,11,.04);
+ --shadow-lg:0 12px 34px -14px rgba(9,9,11,.30);
+ --sidebar-w:248px;
+}
+body.dark{
+ --bg:#09090b;--panel:#131316;--panel2:#1d1d20;
+ --fg:#fafafa;--muted:#a1a1aa;--muted2:#71717a;
+ --border:#27272a;--border2:#3f3f46;
+ --accent:#60a5fa;--gold:#fbbf24;
+ --shadow-sm:0 1px 2px rgba(0,0,0,.4);
+ --shadow:0 1px 3px rgba(0,0,0,.5);
+ --shadow-lg:0 14px 36px -14px rgba(0,0,0,.7);
+}
+html{-webkit-text-size-adjust:100%}
+body{margin:0;font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--fg);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
+h1,h2,h3{margin:0;font-weight:650;letter-spacing:-.012em}
+a{color:var(--accent);text-decoration:none}
+::selection{background:color-mix(in srgb,var(--accent) 26%,transparent)}
+.muted{color:var(--muted)}.pos{color:var(--pos)}.neg{color:var(--neg)}
+
+/* ---- Shell ---- */
+.shell{display:grid;grid-template-columns:var(--sidebar-w) 1fr;min-height:100vh}
+.sidebar{position:sticky;top:0;height:100vh;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:18px 14px;gap:4px;overflow-y:auto}
+.brand{display:flex;align-items:center;gap:11px;padding:4px 8px 18px;font-weight:700;font-size:1.05rem;letter-spacing:-.02em}
+.blogo{width:32px;height:32px;border-radius:9px;background:linear-gradient(140deg,var(--accent),color-mix(in srgb,var(--accent) 45%,#000));display:grid;place-items:center;color:#fff;flex:none;font-size:1.05rem}
+.nav{display:flex;flex-direction:column;gap:2px}
+.tab{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:8px;border:none;background:none;color:var(--muted);font:inherit;font-weight:500;font-size:.92rem;cursor:pointer;text-align:left;width:100%;transition:background .12s,color .12s}
+.tab .tcon{width:18px;height:18px;flex:none;display:grid;place-items:center;font-size:1rem}
+.tab:hover{background:var(--panel2);color:var(--fg)}
+.tab.active{background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--accent);font-weight:600}
+.sidebar-foot{margin-top:auto;display:flex;flex-direction:column;gap:2px;padding-top:12px;border-top:1px solid var(--border)}
+.content{min-width:0;display:flex;flex-direction:column}
+.topbar2{height:58px;flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 24px;border-bottom:1px solid var(--border);position:sticky;top:0;background:color-mix(in srgb,var(--bg) 80%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);z-index:20}
+.pagetitle{font-size:1.02rem;font-weight:650;letter-spacing:-.01em;display:flex;align-items:center;gap:9px}
+.topactions{display:flex;align-items:center;gap:10px}
+main{padding:26px 24px 90px;width:100%;max-width:1060px;margin:0 auto}
+.iconchip{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;min-width:36px;padding:0 11px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--fg);cursor:pointer;font:inherit;font-weight:500;font-size:.85rem}
+.iconchip:hover{background:var(--panel2)}
+.bottomnav{display:none}
+
+/* ---- Cards ---- */
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin:0 0 16px;box-shadow:var(--shadow-sm)}
+.sect{font-size:1rem;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+@media(max-width:760px){.grid2{grid-template-columns:1fr}}
+
+/* ---- Buttons / Forms ---- */
+button.primary{background:var(--accent);color:var(--accent-fg);border:none;border-radius:9px;padding:11px 18px;font:inherit;font-weight:600;cursor:pointer;box-shadow:var(--shadow-sm)}
+button.primary:hover{filter:brightness(1.07)}
+button.ghost{background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:10px 16px;font:inherit;font-weight:500;color:var(--fg);cursor:pointer}
+button.ghost:hover{background:var(--panel2)}
+button.danger{background:none;border:1px solid color-mix(in srgb,var(--neg) 40%,transparent);color:var(--neg);border-radius:9px;padding:9px 14px;font:inherit;font-weight:500;cursor:pointer}
+.linkbtn{background:none;border:none;color:var(--accent);font:inherit;font-weight:500;cursor:pointer;padding:0;display:block}
+label.f{display:block;font-size:.83rem;font-weight:600;color:var(--muted);margin:12px 0 4px}
+input[type=text],input[type=number],input[type=date],input[type=email],input[type=password],select,textarea{width:100%;padding:10px 12px;border:1px solid var(--border2);border-radius:9px;background:var(--panel);color:var(--fg);font:inherit;font-size:.95rem}
+input:focus,select:focus,textarea:focus{outline:2px solid color-mix(in srgb,var(--accent) 45%,transparent);outline-offset:1px;border-color:var(--accent)}
+textarea{min-height:74px;resize:vertical}
+.formrow{display:grid;grid-template-columns:1fr 1fr;gap:0 14px}
+@media(max-width:560px){.formrow{grid-template-columns:1fr}}
+.btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
+
+/* ---- Dashboard ---- */
+.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
+@media(max-width:680px){.kpis{grid-template-columns:1fr 1fr}}
+.kpi{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px}
+.kpi .klabel{font-size:.78rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
+.kpi .kval{font-size:1.5rem;font-weight:700;letter-spacing:-.02em;margin-top:2px}
+.kpi .ksub{font-size:.8rem;color:var(--muted2)}
+.bigadd{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:16px;border:2px dashed var(--border2);border-radius:var(--radius);background:none;color:var(--muted);font:inherit;font-weight:600;font-size:1rem;cursor:pointer;margin-bottom:16px}
+.bigadd:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 5%,transparent)}
+
+/* ---- Fristen / Ampel ---- */
+.frow{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid var(--border)}
+.frow:last-child{border-bottom:none}
+.dot{width:12px;height:12px;border-radius:50%;flex:none}
+.dot.red{background:var(--neg);box-shadow:0 0 0 4px color-mix(in srgb,var(--neg) 18%,transparent)}
+.dot.amber{background:var(--warn);box-shadow:0 0 0 4px color-mix(in srgb,var(--warn) 18%,transparent)}
+.dot.green{background:var(--pos)}
+.dot.gray{background:var(--muted2)}
+.fmain{flex:1;min-width:0;cursor:pointer}
+.ftitle{font-weight:600;font-size:.95rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.fsub{font-size:.83rem;color:var(--muted)}
+.fsub b{color:var(--fg)}
+.fact{display:flex;gap:6px;flex:none}
+
+/* ---- Verträge ---- */
+.clist{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:760px){.clist{grid-template-columns:1fr}}
+.ccard{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px;cursor:pointer;box-shadow:var(--shadow-sm);transition:border-color .12s}
+.ccard:hover{border-color:var(--accent)}
+.chead{display:flex;align-items:center;gap:10px}
+.cicon{width:38px;height:38px;border-radius:10px;background:var(--panel2);display:grid;place-items:center;font-size:1.15rem;flex:none}
+.cname{font-weight:650;font-size:.97rem;line-height:1.25}
+.csub{font-size:.8rem;color:var(--muted)}
+.cmeta{display:flex;justify-content:space-between;align-items:center;margin-top:12px;font-size:.85rem}
+.ccost{font-weight:650}
+.badge{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:99px;font-size:.75rem;font-weight:600}
+.badge.red{background:color-mix(in srgb,var(--neg) 13%,transparent);color:var(--neg)}
+.badge.amber{background:color-mix(in srgb,var(--warn) 14%,transparent);color:var(--warn)}
+.badge.green{background:color-mix(in srgb,var(--pos) 12%,transparent);color:var(--pos)}
+.badge.gray{background:var(--panel2);color:var(--muted)}
+.badge.law{background:color-mix(in srgb,var(--accent) 11%,transparent);color:var(--accent)}
+.dgrid{display:grid;grid-template-columns:auto 1fr;gap:6px 18px;font-size:.92rem;margin:10px 0}
+.dgrid .dk{color:var(--muted);white-space:nowrap}
+.dgrid .dv{font-weight:550;overflow-wrap:anywhere}
+
+/* ---- Dokumente ---- */
+.docrow{display:flex;gap:12px;padding:13px 4px;border-bottom:1px solid var(--border);align-items:flex-start}
+.docrow:last-child{border-bottom:none}
+.dicon{width:36px;height:36px;border-radius:9px;background:var(--panel2);display:grid;place-items:center;font-size:1.05rem;flex:none;margin-top:2px}
+.dbody{flex:1;min-width:0}
+.dname{font-weight:600;font-size:.92rem;overflow-wrap:anywhere}
+.dsum{font-size:.85rem;color:var(--muted);margin-top:2px}
+.dmeta{font-size:.78rem;color:var(--muted2);margin-top:3px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
+.dact{display:flex;flex-direction:column;gap:6px;flex:none}
+.dact button{font-size:.8rem;padding:6px 10px}
+.filterbar{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
+.filterbar select,.filterbar input{width:auto;flex:1;min-width:130px}
+
+/* ---- Upload / KI ---- */
+.upzone{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media(max-width:560px){.upzone{grid-template-columns:1fr}}
+.upbtn{display:flex;flex-direction:column;align-items:center;gap:8px;padding:26px 14px;border:2px dashed var(--border2);border-radius:var(--radius);background:none;color:var(--fg);font:inherit;font-weight:600;cursor:pointer}
+.upbtn:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 5%,transparent)}
+.upbtn .uic{font-size:1.9rem}
+.upbtn .usub{font-size:.8rem;font-weight:400;color:var(--muted)}
+.aiwork{display:flex;align-items:center;gap:12px;padding:14px}
+.spin{width:22px;height:22px;border:3px solid var(--border2);border-top-color:var(--accent);border-radius:50%;animation:sp 0.9s linear infinite;flex:none}
+@keyframes sp{to{transform:rotate(360deg)}}
+.ainote{background:color-mix(in srgb,var(--accent) 7%,transparent);border:1px solid color-mix(in srgb,var(--accent) 25%,transparent);border-radius:var(--radius-sm);padding:12px 14px;font-size:.9rem;margin:12px 0}
+.wichtig{margin:8px 0 0;padding-left:20px;font-size:.9rem}
+.wichtig li{margin:3px 0}
+
+/* ---- Einstellungen / Haushalt ---- */
+.acclabel{font-size:.82rem;font-weight:650;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:4px 0 8px}
+.accsep{margin-top:26px;padding-top:18px;border-top:1px solid var(--border)}
+.hhlist{display:flex;flex-direction:column;gap:8px}
+.hhopt{display:flex;justify-content:space-between;align-items:center;padding:11px 14px;border:1px solid var(--border);border-radius:9px;background:var(--panel);font:inherit;cursor:pointer;color:var(--fg)}
+.hhopt.active{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,transparent)}
+.hhopt .hhname{font-weight:600}
+.hhopt .hhtag{font-size:.8rem;color:var(--muted)}
+.hhopt.active .hhtag{color:var(--accent);font-weight:600}
+.hhadd{display:flex;gap:8px}
+.hhadd input{flex:1}
+.inviteout{margin-top:10px;padding:12px;border:1px dashed var(--border2);border-radius:9px;font-size:.9rem}
+.invcode{font-size:1.15rem;letter-spacing:.08em}
+.invcopy{margin-left:10px;font-size:.8rem;padding:4px 10px;border:1px solid var(--border);border-radius:7px;background:var(--panel);cursor:pointer;color:var(--fg)}
+.invhint{color:var(--muted);font-size:.82rem;margin:8px 0 0}
+
+/* ---- Auth ---- */
+.authscreen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:100;padding:20px}
+.authscreen[hidden]{display:none}
+.authcard{width:100%;max-width:400px;background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:30px 28px;box-shadow:var(--shadow-lg)}
+.authlogo{width:52px;height:52px;border-radius:14px;background:linear-gradient(140deg,#1d4ed8,#172554);display:grid;place-items:center;font-size:1.6rem;margin:0 auto 14px}
+.authcard h1{text-align:center;font-size:1.25rem}
+.authsub{text-align:center;color:var(--muted);font-size:.88rem;margin:6px 0 18px}
+.authmsg{padding:10px 12px;border-radius:9px;font-size:.87rem;margin-bottom:12px;background:var(--panel2)}
+.authmsg.err{background:color-mix(in srgb,var(--neg) 10%,transparent);color:var(--neg)}
+.authmsg.ok{background:color-mix(in srgb,var(--pos) 10%,transparent);color:var(--pos)}
+.authcard label{display:block;font-size:.83rem;font-weight:600;color:var(--muted);margin:12px 0 4px}
+.authbtns{display:flex;flex-direction:column;gap:9px;margin-top:18px}
+.authforgot{text-align:center;margin-top:14px;font-size:.85rem}
+body.app-hidden .shell{display:none}
+
+/* ---- Toast ---- */
+#toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);background:#26262b;color:#fff;padding:13px 20px;border-radius:10px;font-size:.9rem;font-weight:500;opacity:0;pointer-events:none;transition:all .22s;z-index:200;box-shadow:var(--shadow-lg);max-width:min(480px,90vw);min-height:24px}
+#toast.show{opacity:1;transform:translate(-50%,0)}
+#toast.err{background:#b3261e}
+
+/* ---- Mobile ---- */
+@media(max-width:900px){
+ .shell{grid-template-columns:1fr}
+ .sidebar{display:none}
+ main{padding:18px 14px 96px}
+ .bottomnav{display:flex;position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:1px solid var(--border);z-index:30;padding:4px 6px calc(4px + env(safe-area-inset-bottom))}
+ .bottomnav .tab{flex-direction:column;gap:2px;font-size:.68rem;padding:7px 2px;align-items:center;text-align:center;border-radius:10px}
+ .bottomnav .tab .tcon{font-size:1.25rem;width:auto;height:auto}
+}
+@media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
+</style>
+</head>
+<body class="app-hidden">
+
+<div id="authscreen" class="authscreen" hidden>
+  <div class="authcard">
+    <div class="authlogo">🎩</div>
+    <h1>Dokumenten-Butler</h1>
+    <p class="authsub" id="auth_sub">Bitte melde dich an – dein Butler kümmert sich um den Papierkram.</p>
+    <div id="auth_msg" class="authmsg" hidden></div>
+    <div id="auth_login_panel">
+      <label for="auth_email">E-Mail</label>
+      <input id="auth_email" type="email" autocomplete="username" placeholder="name@beispiel.de">
+      <label for="auth_pass">Passwort</label>
+      <input id="auth_pass" type="password" autocomplete="current-password" placeholder="••••••••">
+      <div class="authbtns">
+        <button class="primary" id="auth_login">Anmelden</button>
+        <button class="ghost" id="auth_signup">Neues Konto erstellen</button>
+      </div>
+      <div class="authforgot"><button class="linkbtn" id="auth_forgot" style="display:inline">Passwort vergessen?</button></div>
+    </div>
+    <div id="auth_reset_panel" hidden>
+      <label for="auth_newpass">Neues Passwort</label>
+      <input id="auth_newpass" type="password" autocomplete="new-password" placeholder="mindestens 6 Zeichen">
+      <div class="authbtns"><button class="primary" id="auth_setpass">Passwort speichern</button></div>
+    </div>
+  </div>
+</div>
+
+<div class="shell">
+  <aside class="sidebar">
+    <div class="brand"><span class="blogo">🎩</span> Butler</div>
+    <nav class="nav" id="tabs"></nav>
+    <div class="sidebar-foot" id="tabsFoot"></div>
+  </aside>
+  <div class="content">
+    <div class="topbar2">
+      <div class="pagetitle" id="pageTitle">Übersicht</div>
+      <div class="topactions">
+        <button class="iconchip" id="themeBtn" title="Hell/Dunkel">🌙</button>
+      </div>
+    </div>
+    <main id="app"></main>
+  </div>
+</div>
+<nav class="bottomnav" id="tabsMobile"></nav>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
+<script>
+(function(){
+"use strict";
+
+/* ---------- Konfiguration ---------- */
+var SB_URL="https://xiwibfscbfrglgfjadza.supabase.co";
+var SB_KEY="sb_publishable_HwDaZdyk-HcYjBLcJvsVnQ_gHCAcprm";
+var BUCKET="butler-documents";
+var EDGE_FN="butler-extract";
+var sb=window.supabase.createClient(SB_URL,SB_KEY,{auth:{persistSession:true,autoRefreshToken:true},db:{schema:"butler"}});
+var sbPub=sb.schema("public");
+
+var KAT={
+ mobilfunk:{label:"Mobilfunk",icon:"📱"},
+ internet:{label:"Internet / Festnetz",icon:"🌐"},
+ strom:{label:"Strom",icon:"⚡"},
+ gas:{label:"Gas",icon:"🔥"},
+ wasser:{label:"Wasser",icon:"💧"},
+ versicherung:{label:"Versicherung",icon:"🛡️"},
+ streaming:{label:"Streaming / Abo",icon:"🎬"},
+ bank:{label:"Bank / Finanzen",icon:"🏦"},
+ kfz:{label:"Auto / KFZ",icon:"🚗"},
+ wohnen:{label:"Wohnen",icon:"🏠"},
+ gesundheit:{label:"Gesundheit",icon:"⚕️"},
+ mitgliedschaft:{label:"Mitgliedschaft",icon:"🎫"},
+ sonstiges:{label:"Sonstiges",icon:"📄"}
+};
+var DOCTYPE={
+ vertrag:{label:"Vertrag",icon:"📑"},
+ rechnung:{label:"Rechnung",icon:"🧾"},
+ police:{label:"Police",icon:"🛡️"},
+ kuendigung:{label:"Kündigung",icon:"✂️"},
+ preisaenderung:{label:"Preisänderung",icon:"📈"},
+ schreiben:{label:"Schreiben",icon:"✉️"},
+ sonstiges:{label:"Dokument",icon:"📄"}
+};
+var INTERVALL={monatlich:1,vierteljaehrlich:3,halbjaehrlich:6,jaehrlich:12};
+var INTERVALL_LABEL={monatlich:"monatlich",vierteljaehrlich:"vierteljährlich",halbjaehrlich:"halbjährlich",jaehrlich:"jährlich",einmalig:"einmalig"};
+var NEUES_RECHT_AB="2022-03-01";
+
+/* ---------- Zustand ---------- */
+var currentUser=null,enteredUserId=null;
+var HOUSEHOLDS=[],activeHousehold=null;
+var CONTRACTS=[],DOCS=[];
+var activeView="dashboard";
+var detailId=null;          /* geöffneter Vertrag */
+var editId=null;            /* Vertrag im Bearbeiten-Formular */
+var formPrefill=null;       /* Vorbefüllung des Vertragsformulars (aus KI) */
+var pendingDoc=null;        /* zuletzt hochgeladenes Dokument (fürs Verknüpfen) */
+var reviewDoc=null;         /* Dokument im KI-Review */
+var docFilter={kat:"",typ:"",q:""};
+
+/* ---------- Helfer ---------- */
+function $(s){return document.querySelector(s);}
+function escapeHtml(s){return String(s==null?"":s).replace(/[&<>"']/g,function(c){return {"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c];});}
+function errMsg(e){if(!e)return "Unbekannter Fehler";if(typeof e==="string")return e;return e.message||e.error_description||e.msg||JSON.stringify(e);}
+function fmtEur(n){if(n==null||isNaN(n))return "–";return Number(n).toLocaleString("de-DE",{style:"currency",currency:"EUR"});}
+function fmtDate(iso){if(!iso)return "–";var p=String(iso).slice(0,10).split("-");if(p.length<3)return iso;return p[2]+"."+p[1]+"."+p[0];}
+function todayISO(){var d=new Date();return d.getFullYear()+"-"+String(d.getMonth()+1).padStart(2,"0")+"-"+String(d.getDate()).padStart(2,"0");}
+function addMonthsISO(iso,months){
+  var p=String(iso).slice(0,10).split("-").map(Number);
+  var whole=Math.trunc(months),days=Math.round((months-whole)*30);
+  var d=new Date(Date.UTC(p[0],p[1]-1+whole,p[2]));
+  if(d.getUTCDate()!==p[2])d=new Date(Date.UTC(p[0],p[1]+whole,0)); /* Monatsende geklemmt */
+  if(days)d.setUTCDate(d.getUTCDate()+days);
+  return d.toISOString().slice(0,10);
+}
+function daysUntil(iso){
+  var t=new Date(todayISO()+"T00:00:00Z"),d=new Date(String(iso).slice(0,10)+"T00:00:00Z");
+  return Math.round((d-t)/86400000);
+}
+function numOrNull(v){if(v==null||v==="")return null;var n=Number(String(v).replace(",", "."));return isNaN(n)?null:n;}
+function fileToBase64(file){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){var s=String(r.result||"");var i=s.indexOf(",");res(i>=0?s.slice(i+1):s);};r.onerror=function(){rej(new Error("Datei konnte nicht gelesen werden."));};r.readAsDataURL(file);});}
+var toastTimer;
+function toast(msg,err){
+  var t=$("#toast");if(!t){t=document.createElement("div");t.id="toast";document.body.appendChild(t);}
+  t.textContent=msg;t.className=err?"show err":"show";clearTimeout(toastTimer);toastTimer=setTimeout(function(){t.className="";},3500);
+}
+function katInfo(k){return KAT[k]||KAT.sonstiges;}
+function dtInfo(t){return DOCTYPE[t]||DOCTYPE.sonstiges;}
+
+/* ---------- Fristenlogik ----------
+   Liefert {kind, level, end, lastDay, days, label, sub, neuesRecht}
+   kind: fest | flex | unbekannt | gekuendigt | beendet */
+function fristInfo(c){
+  if(c.status==="beendet")return {kind:"beendet",level:"gray",label:"Beendet",sub:""};
+  if(c.status==="gekuendigt")return {kind:"gekuendigt",level:"gray",label:"Gekündigt"+(c.gekuendigt_zum?" zum "+fmtDate(c.gekuendigt_zum):""),sub:""};
+  var ml=c.mindestlaufzeit_monate,kf=c.kuendigungsfrist_monate,vl=c.verlaengerung_monate;
+  var neu=!!(c.vertragsstart&&c.vertragsstart>=NEUES_RECHT_AB);
+  if(ml===0||(ml==null&&vl===1)){
+    var f=(kf==null?1:kf);
+    return {kind:"flex",level:"green",label:"Jederzeit kündbar",sub:"Kündigungsfrist "+fristTxt(f),neuesRecht:false};
+  }
+  if(!c.vertragsstart||ml==null){
+    return {kind:"unbekannt",level:"gray",label:"Fristen unbekannt",sub:"Vertragsbeginn/Laufzeit ergänzen, dann rechnet der Butler.",neuesRecht:false};
+  }
+  if(kf==null)kf=1;
+  var initialEnd=addMonthsISO(c.vertragsstart,ml);
+  var lastDay=addMonthsISO(initialEnd,-kf);
+  var today=todayISO();
+  if(today<=lastDay){
+    var days=daysUntil(lastDay);
+    return {kind:"fest",level:ampel(days),end:initialEnd,lastDay:lastDay,days:days,
+      label:"Kündbar zum "+fmtDate(initialEnd),
+      sub:"Letzter Kündigungstag: "+fmtDate(lastDay)+" (in "+days+" Tagen)",neuesRecht:false};
+  }
+  /* Erstlaufzeit(-Fenster) vorbei → Verlängerungsphase */
+  var effVl=neu?1:(vl==null?12:vl);
+  var effKf=neu?Math.min(kf,1):kf;
+  if(effVl<=1){
+    return {kind:"flex",level:"green",label:"Jederzeit kündbar",sub:"Kündigungsfrist "+fristTxt(effKf)+(neu?" · nach neuem Recht (ab 3/2022) monatlich kündbar":""),neuesRecht:neu};
+  }
+  var end=initialEnd,guard=0;
+  while(addMonthsISO(end,-effKf)<today&&guard<600){end=addMonthsISO(end,effVl);guard++;}
+  var ld=addMonthsISO(end,-effKf),dy=daysUntil(ld);
+  return {kind:"fest",level:ampel(dy),end:end,lastDay:ld,days:dy,
+    label:"Kündbar zum "+fmtDate(end),
+    sub:"Letzter Kündigungstag: "+fmtDate(ld)+" (in "+dy+" Tagen) · Altvertrag: verlängert sich um "+effVl+" Monate",neuesRecht:false};
+}
+function ampel(days){return days<=30?"red":(days<=90?"amber":"green");}
+function fristTxt(m){if(m==null)return "unbekannt";if(m===0.5)return "2 Wochen";if(m===1)return "1 Monat";if(m<1)return Math.round(m*30)+" Tage";return m+" Monate";}
+function monatskosten(c){
+  if(c.kosten==null||c.status!=="aktiv")return 0;
+  var m=INTERVALL[c.kosten_intervall];
+  if(!m)return 0; /* einmalig/unbekannt zählt nicht laufend */
+  return Number(c.kosten)/m;
+}
+
+/* ---------- .ics Kalender-Export ---------- */
+function icsDownload(c){
+  var f=fristInfo(c);if(!f.lastDay){toast("Für diesen Vertrag ist keine Frist berechenbar.",true);return;}
+  var name=(c.anbieter||"Vertrag")+(c.produkt?" – "+c.produkt:"");
+  var dt=f.lastDay.replace(/-/g,"");
+  var stamp=new Date().toISOString().replace(/[-:]/g,"").slice(0,15)+"Z";
+  var uid="butler-"+c.id+"-"+dt+"@dokumenten-butler";
+  var desc="Letzter Kündigungstag für "+name+". Vertrag läuft sonst weiter bis "+fmtDate(f.end)+"."+(c.kundennummer?" Kundennummer: "+c.kundennummer+".":"");
+  var lines=["BEGIN:VCALENDAR","VERSION:2.0","PRODID:-//Dokumenten-Butler//DE","BEGIN:VEVENT",
+    "UID:"+uid,"DTSTAMP:"+stamp,"DTSTART;VALUE=DATE:"+dt,
+    "SUMMARY:"+icsEsc("⏰ Kündigungsfrist: "+name),
+    "DESCRIPTION:"+icsEsc(desc),
+    "BEGIN:VALARM","TRIGGER:-P14D","ACTION:DISPLAY","DESCRIPTION:"+icsEsc("In 14 Tagen: Kündigungsfrist "+name),"END:VALARM",
+    "END:VEVENT","END:VCALENDAR"];
+  var blob=new Blob([lines.join("\r\n")],{type:"text/calendar;charset=utf-8"});
+  var a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download="kuendigungsfrist-"+(c.anbieter||"vertrag").toLowerCase().replace(/[^a-z0-9]+/g,"-")+".ics";
+  document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},400);
+  toast("Kalender-Datei erstellt 📅 – öffne sie, um den Termin zu übernehmen.");
+}
+function icsEsc(s){return String(s).replace(/\\/g,"\\\\").replace(/;/g,"\\;").replace(/,/g,"\\,").replace(/\n/g,"\\n");}
+
+/* ---------- Datenzugriff ---------- */
+async function loadFromDB(){
+  if(!activeHousehold){CONTRACTS=[];DOCS=[];return;}
+  var rc=await sb.from("contracts").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:false});
+  if(rc.error)throw rc.error;
+  CONTRACTS=rc.data||[];
+  var rd=await sb.from("documents").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:false});
+  if(rd.error)throw rd.error;
+  DOCS=rd.data||[];
+}
+function contractById(id){return CONTRACTS.find(function(c){return c.id===id;})||null;}
+async function saveContractData(cols,id){
+  if(id){var r=await sb.from("contracts").update(cols).eq("id",id);if(r.error)throw r.error;return id;}
+  cols.household_id=activeHousehold;
+  var r2=await sb.from("contracts").insert(cols).select("id").single();if(r2.error)throw r2.error;return r2.data.id;
+}
+async function deleteContract(id){
+  var c=contractById(id);if(!c)return;
+  if(!confirm("Vertrag „"+(c.anbieter||"?")+"" +(c.produkt?" – "+c.produkt:"")+"“ wirklich löschen? Zugeordnete Dokumente bleiben im Archiv."))return;
+  try{
+    var r=await sb.from("contracts").delete().eq("id",id);if(r.error)throw r.error;
+    await loadFromDB();detailId=null;go("contracts");toast("Vertrag gelöscht ✅");
+  }catch(e){toast("Löschen fehlgeschlagen: "+errMsg(e),true);}
+}
+async function linkDoc(docId,contractId){
+  try{
+    var r=await sb.from("documents").update({contract_id:contractId||null}).eq("id",docId);if(r.error)throw r.error;
+    await loadFromDB();renderApp();toast(contractId?"Dokument zugeordnet ✅":"Zuordnung entfernt ✅");
+  }catch(e){toast("Zuordnen fehlgeschlagen: "+errMsg(e),true);}
+}
+async function viewDoc(docId){
+  var d=DOCS.find(function(x){return x.id===docId;});if(!d)return;
+  try{
+    var r=await sb.storage.from(BUCKET).createSignedUrl(d.storage_path,120);
+    if(r.error)throw r.error;
+    window.open(r.data.signedUrl,"_blank");
+  }catch(e){toast("Konnte Dokument nicht öffnen: "+errMsg(e),true);}
+}
+async function deleteDoc(docId){
+  var d=DOCS.find(function(x){return x.id===docId;});if(!d)return;
+  if(!confirm("Dokument „"+(d.filename||"?")+"“ endgültig löschen?"))return;
+  try{
+    try{await sb.storage.from(BUCKET).remove([d.storage_path]);}catch(e){}
+    var r=await sb.from("documents").delete().eq("id",docId);if(r.error)throw r.error;
+    await loadFromDB();renderApp();toast("Dokument gelöscht ✅");
+  }catch(e){toast("Löschen fehlgeschlagen: "+errMsg(e),true);}
+}
+
+/* ---------- Upload + KI ---------- */
+var ALLOWED_IMG={"image/jpeg":1,"image/png":1,"image/webp":1,"image/gif":1};
+function compressImage(file){
+  return new Promise(function(res,rej){
+    var url=URL.createObjectURL(file),img=new Image();
+    img.onload=function(){
+      var max=1800,w=img.naturalWidth,h=img.naturalHeight;
+      var sc=Math.min(1,max/Math.max(w,h));
+      var cv=document.createElement("canvas");cv.width=Math.round(w*sc);cv.height=Math.round(h*sc);
+      cv.getContext("2d").drawImage(img,0,0,cv.width,cv.height);
+      URL.revokeObjectURL(url);
+      cv.toBlob(function(b){if(b)res(b);else rej(new Error("Bild konnte nicht verarbeitet werden."));},"image/jpeg",0.82);
+    };
+    img.onerror=function(){URL.revokeObjectURL(url);rej(new Error("Bildformat wird nicht unterstützt. Bitte JPG/PNG oder PDF verwenden."));};
+    img.src=url;
+  });
+}
+async function onAddFile(file){
+  if(!file)return;
+  if(!activeHousehold){toast("Kein Haushalt aktiv.",true);return;}
+  var isPdf=file.type==="application/pdf"||/\.pdf$/i.test(file.name||"");
+  if(!isPdf&&!ALLOWED_IMG[file.type]&&!/^image\//.test(file.type)){toast("Bitte ein PDF oder Foto (JPG/PNG) auswählen.",true);return;}
+  if(isPdf&&file.size>12*1024*1024){toast("Das PDF ist größer als 12 MB – bitte eine kleinere Datei verwenden.",true);return;}
+  showAiWork("Dokument wird vorbereitet …");
+  var blob=file,mime=file.type||"application/pdf",fname=file.name||("scan-"+Date.now()+".jpg");
+  try{
+    if(!isPdf){blob=await compressImage(file);mime="image/jpeg";fname=fname.replace(/\.[^.]+$/,"")+".jpg";}
+  }catch(e){hideAiWork();toast(errMsg(e),true);return;}
+  /* 1) Ins Archiv hochladen (best effort, wie beim Tracker) */
+  showAiWork("Dokument wird sicher abgelegt …");
+  var docRow=null;
+  try{
+    var safe=fname.replace(/[^\wäöüÄÖÜß.\-]+/g,"_").slice(-80);
+    var path=activeHousehold+"/"+Date.now()+"_"+safe;
+    var up=await sb.storage.from(BUCKET).upload(path,blob,{contentType:mime,upsert:false});
+    if(up.error)throw up.error;
+    var ins=await sb.from("documents").insert({household_id:activeHousehold,filename:fname,storage_path:path,mime_type:mime,size_bytes:blob.size,doc_type:"sonstiges"}).select("*").single();
+    if(ins.error)throw ins.error;
+    docRow=ins.data;
+  }catch(e){hideAiWork();toast("Ablegen fehlgeschlagen: "+errMsg(e),true);return;}
+  /* 2) KI liest das Dokument */
+  showAiWork("🎩 Der Butler liest das Dokument … (KI, ca. 10–30 Sek.)");
+  var ext=null;
+  try{
+    var b64=await fileToBase64(blob);
+    var r=await sb.functions.invoke(EDGE_FN,{body:{fileBase64:b64,mimeType:mime}});
+    if(r.error)throw r.error;
+    var body=r.data||{};
+    if(body.error)throw new Error(body.error);
+    ext=body.dokument||null;
+  }catch(e){
+    hideAiWork();
+    await loadFromDB();
+    reviewDoc=null;
+    toast("Das Dokument wurde abgelegt, aber die KI-Analyse schlug fehl: "+errMsg(e),true);
+    go("docs");return;
+  }
+  /* 3) Ergebnis am Dokument speichern */
+  try{
+    var upd={extracted:ext,doc_type:(ext&&DOCTYPE[ext.docType])?ext.docType:"sonstiges",doc_date:(ext&&ext.datum)||null,zusammenfassung:(ext&&ext.zusammenfassung)||null};
+    var ru=await sb.from("documents").update(upd).eq("id",docRow.id);if(ru.error)throw ru.error;
+  }catch(e){}
+  hideAiWork();
+  await loadFromDB();
+  reviewDoc=DOCS.find(function(d){return d.id===docRow.id;})||docRow;
+  renderApp();
+}
+function showAiWork(msg){var el=$("#aiWork");if(el){el.hidden=false;el.querySelector(".aimsg").textContent=msg;}}
+function hideAiWork(){var el=$("#aiWork");if(el)el.hidden=true;}
+function findMatch(ext){
+  if(!ext)return null;
+  var kd=(ext.kundennummer||"").replace(/\s+/g,"").toLowerCase();
+  var vn=(ext.vertragsnummer||"").replace(/\s+/g,"").toLowerCase();
+  var ab=(ext.anbieter||"").toLowerCase();
+  var best=null;
+  CONTRACTS.forEach(function(c){
+    var ckd=(c.kundennummer||"").replace(/\s+/g,"").toLowerCase();
+    var cvn=(c.vertragsnummer||"").replace(/\s+/g,"").toLowerCase();
+    if(kd&&ckd&&kd===ckd){best=c;return;}
+    if(vn&&cvn&&vn===cvn){best=c;return;}
+    if(!best&&ab&&c.anbieter&&(ab.indexOf(c.anbieter.toLowerCase())>=0||c.anbieter.toLowerCase().indexOf(ab)>=0)&&(ext.kategorie===c.kategorie))best=c;
+  });
+  return best;
+}
+
+/* ---------- Views ---------- */
+function go(view){activeView=view;if(view!=="contract-detail")detailId=null;renderApp();window.scrollTo({top:0,behavior:"smooth"});}
+function navItem(v,label,icon){return '<button class="tab'+(v===activeView?" active":"")+'" data-nav="'+v+'"><span class="tcon">'+icon+'</span>'+label+'</button>';}
+function renderTabs(){
+  var items=navItem("dashboard","Übersicht","🏠")+navItem("contracts","Verträge","📑")+navItem("docs","Dokumente","📁")+navItem("add","Hinzufügen","➕");
+  var t=$("#tabs");if(t)t.innerHTML=items;
+  var f=$("#tabsFoot");if(f)f.innerHTML=navItem("settings","Einstellungen","⚙️");
+  var m=$("#tabsMobile");if(m)m.innerHTML=navItem("dashboard","Start","🏠")+navItem("contracts","Verträge","📑")+navItem("add","Neu","➕")+navItem("docs","Doku","📁")+navItem("settings","Konto","⚙️");
+  var titles={dashboard:"Übersicht",contracts:"Verträge","contract-detail":"Vertrag","contract-form":(editId?"Vertrag bearbeiten":"Neuer Vertrag"),docs:"Dokumente",add:"Dokument hinzufügen",settings:"Einstellungen"};
+  var pt=$("#pageTitle");if(pt)pt.textContent=titles[activeView]||"Butler";
+}
+function renderApp(){
+  renderTabs();
+  var app=$("#app");if(!app)return;
+  if(!currentUser){app.innerHTML="";return;}
+  if(activeView==="dashboard")app.innerHTML=viewDashboard();
+  else if(activeView==="contracts")app.innerHTML=viewContracts();
+  else if(activeView==="contract-detail")app.innerHTML=viewContractDetail();
+  else if(activeView==="contract-form")app.innerHTML=viewContractForm();
+  else if(activeView==="docs")app.innerHTML=viewDocs();
+  else if(activeView==="add")app.innerHTML=viewAdd();
+  else if(activeView==="settings"){app.innerHTML=viewSettings();refreshHhMeta();}
+}
+
+/* ---- Dashboard ---- */
+function viewDashboard(){
+  var aktive=CONTRACTS.filter(function(c){return c.status==="aktiv";});
+  var mk=aktive.reduce(function(s,c){return s+monatskosten(c);},0);
+  var rows=CONTRACTS.filter(function(c){return c.status!=="beendet";}).map(function(c){return {c:c,f:fristInfo(c)};});
+  rows.sort(function(a,b){
+    var oa=a.f.days!=null?a.f.days:(a.f.kind==="flex"?99990:99999);
+    var ob=b.f.days!=null?b.f.days:(b.f.kind==="flex"?99990:99999);
+    return oa-ob;
+  });
+  var fr=rows.length?rows.map(function(r){return fristRow(r.c,r.f);}).join(""):'<p class="muted">Noch keine Verträge. Lade ein Dokument hoch oder lege einen Vertrag an – der Butler übernimmt den Rest.</p>';
+  var recent=DOCS.slice(0,3).map(docRow).join("")||'<p class="muted">Noch keine Dokumente im Archiv.</p>';
+  return '<button class="bigadd" data-nav="add">➕ &nbsp;Dokument hochladen oder fotografieren</button>'+
+    '<div class="kpis">'+
+      '<div class="kpi"><div class="klabel">Monatliche Kosten</div><div class="kval">'+fmtEur(mk)+'</div><div class="ksub">'+aktive.length+' aktive Verträge</div></div>'+
+      '<div class="kpi"><div class="klabel">Kosten pro Jahr</div><div class="kval">'+fmtEur(mk*12)+'</div><div class="ksub">laufende Verträge</div></div>'+
+      '<div class="kpi"><div class="klabel">Dokumente</div><div class="kval">'+DOCS.length+'</div><div class="ksub">im Archiv</div></div>'+
+    '</div>'+
+    '<section class="card"><h2 class="sect">⏰ Fristen im Blick</h2>'+fr+'</section>'+
+    '<section class="card"><h2 class="sect">🕘 Zuletzt hinzugefügt</h2>'+recent+'</section>';
+}
+function fristRow(c,f){
+  var k=katInfo(c.kategorie);
+  var ics=(f.lastDay)?'<button class="ghost" data-action="ics" data-id="'+c.id+'" title="In Kalender übernehmen">📅</button>':"";
+  return '<div class="frow"><span class="dot '+f.level+'"></span>'+
+    '<div class="fmain" data-action="open-contract" data-id="'+c.id+'">'+
+      '<div class="ftitle">'+k.icon+' '+escapeHtml(c.anbieter||"?")+(c.produkt?' <span class="muted">· '+escapeHtml(c.produkt)+'</span>':"")+'</div>'+
+      '<div class="fsub"><b>'+escapeHtml(f.label)+'</b>'+(f.sub?' – '+escapeHtml(f.sub):"")+'</div>'+
+    '</div><div class="fact">'+ics+'</div></div>';
+}
+
+/* ---- Verträge ---- */
+function viewContracts(){
+  if(!CONTRACTS.length)return '<section class="card"><h2 class="sect">📑 Verträge</h2><p class="muted">Noch keine Verträge angelegt. Am schnellsten geht es, wenn du ein Vertrags-PDF oder einen Brief hochlädst – der Butler füllt alles aus.</p><div class="btnrow"><button class="primary" data-nav="add">➕ Dokument hochladen</button><button class="ghost" data-action="new-contract">Von Hand anlegen</button></div></section>';
+  var cards=CONTRACTS.map(function(c){
+    var k=katInfo(c.kategorie),f=fristInfo(c);
+    var nd=DOCS.filter(function(d){return d.contract_id===c.id;}).length;
+    var badge='<span class="badge '+f.level+'">'+(f.kind==="flex"?"jederzeit kündbar":(f.kind==="fest"?"Frist: "+fmtDate(f.lastDay):escapeHtml(f.label)))+'</span>';
+    return '<div class="ccard" data-action="open-contract" data-id="'+c.id+'">'+
+      '<div class="chead"><span class="cicon">'+k.icon+'</span><div><div class="cname">'+escapeHtml(c.anbieter||"?")+'</div><div class="csub">'+escapeHtml(c.produkt||k.label)+(nd?' · '+nd+' Dok.':"")+'</div></div></div>'+
+      '<div class="cmeta"><span class="ccost">'+(c.kosten!=null?fmtEur(c.kosten)+' <span class="muted">/ '+(INTERVALL_LABEL[c.kosten_intervall]||"?")+'</span>':"")+'</span>'+badge+'</div>'+
+    '</div>';
+  }).join("");
+  return '<div class="btnrow" style="margin:0 0 16px"><button class="primary" data-nav="add">➕ Per Dokument</button><button class="ghost" data-action="new-contract">Von Hand anlegen</button></div><div class="clist">'+cards+'</div>';
+}
+function viewContractDetail(){
+  var c=contractById(detailId);
+  if(!c)return '<section class="card"><p class="muted">Vertrag nicht gefunden.</p></section>';
+  var k=katInfo(c.kategorie),f=fristInfo(c);
+  var law=(c.vertragsstart&&c.vertragsstart>=NEUES_RECHT_AB&&(c.verlaengerung_monate==null||c.verlaengerung_monate>1))
+    ?'<span class="badge law">⚖️ Neues Recht: nach der Mindestlaufzeit monatlich kündbar (max. 1 Monat Frist)</span>':"";
+  var mk=monatskosten(c);
+  var dgrid='<div class="dgrid">'+
+    dRow("Kategorie",k.icon+" "+k.label)+
+    dRow("Anbieter",escapeHtml(c.anbieter||"–"))+
+    dRow("Tarif / Produkt",escapeHtml(c.produkt||"–"))+
+    dRow("Kundennummer",escapeHtml(c.kundennummer||"–"))+
+    dRow("Vertragsnummer",escapeHtml(c.vertragsnummer||"–"))+
+    dRow("Vertragsbeginn",fmtDate(c.vertragsstart))+
+    dRow("Mindestlaufzeit",c.mindestlaufzeit_monate!=null?(c.mindestlaufzeit_monate===0?"keine":c.mindestlaufzeit_monate+" Monate"):"–")+
+    dRow("Kündigungsfrist",fristTxt(c.kuendigungsfrist_monate))+
+    dRow("Verlängerung",c.verlaengerung_monate!=null?(c.verlaengerung_monate<=1?"monatlich":"um "+c.verlaengerung_monate+" Monate"):"–")+
+    dRow("Kosten",c.kosten!=null?fmtEur(c.kosten)+" / "+(INTERVALL_LABEL[c.kosten_intervall]||"?")+(mk?" (= "+fmtEur(mk)+" mtl.)":""):"–")+
+    dRow("Status",c.status==="aktiv"?"✅ aktiv":(c.status==="gekuendigt"?"✂️ gekündigt"+(c.gekuendigt_zum?" zum "+fmtDate(c.gekuendigt_zum):""):"beendet"))+
+    (c.notizen?dRow("Notizen",escapeHtml(c.notizen)):"")+
+  '</div>';
+  var docs=DOCS.filter(function(d){return d.contract_id===c.id;});
+  var docsHtml=docs.length?docs.map(docRow).join(""):'<p class="muted">Noch keine Dokumente zugeordnet.</p>';
+  var statusBtn=c.status==="aktiv"
+    ?'<button class="ghost" data-action="mark-cancelled" data-id="'+c.id+'">✂️ Als gekündigt markieren</button>'
+    :'<button class="ghost" data-action="mark-active" data-id="'+c.id+'">↩️ Wieder als aktiv markieren</button>';
+  return '<button class="linkbtn" data-nav="contracts" style="margin-bottom:12px">← Alle Verträge</button>'+
+    '<section class="card"><h2 class="sect">'+k.icon+' '+escapeHtml(c.anbieter||"?")+(c.produkt?' <span class="muted" style="font-weight:400">· '+escapeHtml(c.produkt)+'</span>':"")+'</h2>'+
+    '<p style="margin:4px 0 2px"><span class="badge '+f.level+'">'+escapeHtml(f.label)+'</span> '+law+'</p>'+
+    (f.sub?'<p class="muted" style="margin:6px 0 0;font-size:.9rem">'+escapeHtml(f.sub)+'</p>':"")+
+    dgrid+
+    '<div class="btnrow">'+
+      (f.lastDay?'<button class="primary" data-action="ics" data-id="'+c.id+'">📅 Frist in Kalender</button>':"")+
+      '<button class="ghost" data-action="edit-contract" data-id="'+c.id+'">✏️ Bearbeiten</button>'+
+      statusBtn+
+      '<button class="danger" data-action="del-contract" data-id="'+c.id+'">🗑️ Löschen</button>'+
+    '</div></section>'+
+    '<section class="card"><h2 class="sect">📁 Dokumente zu diesem Vertrag</h2>'+docsHtml+'</section>';
+}
+function dRow(k,v){return '<span class="dk">'+k+'</span><span class="dv">'+v+'</span>';}
+
+/* ---- Vertragsformular ---- */
+function viewContractForm(){
+  var c=editId?contractById(editId):null;
+  var p=formPrefill||{};
+  function v(field,extKey){if(c&&c[field]!=null)return c[field];if(p[extKey!==undefined?extKey:field]!=null)return p[extKey!==undefined?extKey:field];return "";}
+  var kat=v("kategorie","kategorie")||"sonstiges";
+  var opts=Object.keys(KAT).map(function(kk){return '<option value="'+kk+'"'+(kk===kat?" selected":"")+'>'+KAT[kk].icon+' '+KAT[kk].label+'</option>';}).join("");
+  var iv=v("kosten_intervall","kostenIntervall")||"monatlich";
+  var ivOpts=Object.keys(INTERVALL_LABEL).map(function(kk){return '<option value="'+kk+'"'+(kk===iv?" selected":"")+'>'+INTERVALL_LABEL[kk]+'</option>';}).join("");
+  return '<button class="linkbtn" data-nav="contracts" style="margin-bottom:12px">← Abbrechen</button>'+
+  '<section class="card"><h2 class="sect">'+(c?"✏️ Vertrag bearbeiten":"➕ Neuer Vertrag")+'</h2>'+
+  (formPrefill?'<div class="ainote">🎩 Der Butler hat das Formular aus dem Dokument vorbefüllt. <b>Bitte prüfe alle Angaben</b>, bevor du speicherst.</div>':"")+
+  '<div class="formrow">'+
+   '<div><label class="f">Kategorie</label><select id="cf_kategorie">'+opts+'</select></div>'+
+   '<div><label class="f">Anbieter *</label><input type="text" id="cf_anbieter" value="'+escapeHtml(v("anbieter"))+'" placeholder="z. B. TeleMax GmbH"></div>'+
+   '<div><label class="f">Tarif / Produkt</label><input type="text" id="cf_produkt" value="'+escapeHtml(v("produkt"))+'"></div>'+
+   '<div><label class="f">Kundennummer</label><input type="text" id="cf_kundennummer" value="'+escapeHtml(v("kundennummer"))+'"></div>'+
+   '<div><label class="f">Vertragsnummer</label><input type="text" id="cf_vertragsnummer" value="'+escapeHtml(v("vertragsnummer"))+'"></div>'+
+   '<div><label class="f">Vertragsbeginn</label><input type="date" id="cf_vertragsstart" value="'+escapeHtml(v("vertragsstart"))+'"></div>'+
+   '<div><label class="f">Mindestlaufzeit (Monate, 0 = keine)</label><input type="number" id="cf_ml" min="0" step="1" value="'+escapeHtml(v("mindestlaufzeit_monate","mindestlaufzeitMonate"))+'"></div>'+
+   '<div><label class="f">Kündigungsfrist (Monate, 0,5 = 2 Wochen)</label><input type="number" id="cf_kf" min="0" step="0.5" value="'+escapeHtml(v("kuendigungsfrist_monate","kuendigungsfristMonate"))+'"></div>'+
+   '<div><label class="f">Verlängerung (Monate, 1 = monatlich)</label><input type="number" id="cf_vl" min="1" step="1" value="'+escapeHtml(v("verlaengerung_monate","verlaengerungMonate"))+'"></div>'+
+   '<div><label class="f">Kosten (€)</label><input type="number" id="cf_kosten" min="0" step="0.01" value="'+escapeHtml(v("kosten","kosten"))+'"></div>'+
+   '<div><label class="f">Zahlungsintervall</label><select id="cf_iv">'+ivOpts+'</select></div>'+
+  '</div>'+
+  '<label class="f">Notizen</label><textarea id="cf_notizen">'+escapeHtml(v("notizen"))+'</textarea>'+
+  '<div class="btnrow"><button class="primary" data-action="save-contract">💾 Vertrag speichern</button><button class="ghost" data-nav="contracts">Abbrechen</button></div>'+
+  '</section>';
+}
+async function onSaveContract(){
+  var anbieter=($("#cf_anbieter").value||"").trim();
+  if(!anbieter){toast("Bitte mindestens den Anbieter angeben.",true);$("#cf_anbieter").focus();return;}
+  var cols={
+    kategorie:$("#cf_kategorie").value||"sonstiges",
+    anbieter:anbieter,
+    produkt:($("#cf_produkt").value||"").trim()||null,
+    kundennummer:($("#cf_kundennummer").value||"").trim()||null,
+    vertragsnummer:($("#cf_vertragsnummer").value||"").trim()||null,
+    vertragsstart:$("#cf_vertragsstart").value||null,
+    mindestlaufzeit_monate:numOrNull($("#cf_ml").value),
+    kuendigungsfrist_monate:numOrNull($("#cf_kf").value),
+    verlaengerung_monate:numOrNull($("#cf_vl").value),
+    kosten:numOrNull($("#cf_kosten").value),
+    kosten_intervall:$("#cf_iv").value||"monatlich",
+    notizen:($("#cf_notizen").value||"").trim()||null
+  };
+  try{
+    var id=await saveContractData(cols,editId);
+    if(pendingDoc&&!editId){try{await sb.from("documents").update({contract_id:id}).eq("id",pendingDoc);}catch(e){}}
+    pendingDoc=null;formPrefill=null;var wasEdit=!!editId;editId=null;
+    await loadFromDB();
+    detailId=id;activeView="contract-detail";renderApp();
+    toast(wasEdit?"Vertrag aktualisiert ✅":"Vertrag angelegt ✅");
+  }catch(e){toast("Speichern fehlgeschlagen: "+errMsg(e),true);}
+}
+async function setContractStatus(id,status){
+  var c=contractById(id);if(!c)return;
+  var cols={status:status};
+  if(status==="gekuendigt"){
+    var f=fristInfo(c);
+    var vorschlag=f.end||"";
+    var zum=prompt("Gekündigt zum (Datum, JJJJ-MM-TT):",vorschlag);
+    if(zum===null)return;
+    cols.gekuendigt_zum=(zum||"").trim()||null;
+  }else{cols.gekuendigt_zum=null;}
+  try{
+    await saveContractData(cols,id);
+    await loadFromDB();renderApp();
+    toast(status==="gekuendigt"?"Als gekündigt markiert ✂️":"Wieder aktiv ✅");
+  }catch(e){toast("Änderung fehlgeschlagen: "+errMsg(e),true);}
+}
+
+/* ---- Dokumente ---- */
+function docRow(d){
+  var t=dtInfo(d.doc_type);
+  var c=d.contract_id?contractById(d.contract_id):null;
+  var kat=(d.extracted&&d.extracted.kategorie)?katInfo(d.extracted.kategorie):null;
+  return '<div class="docrow"><span class="dicon">'+t.icon+'</span>'+
+    '<div class="dbody"><div class="dname">'+escapeHtml(d.filename||"Dokument")+'</div>'+
+    (d.zusammenfassung?'<div class="dsum">'+escapeHtml(d.zusammenfassung)+'</div>':"")+
+    '<div class="dmeta"><span>'+t.label+'</span>'+(kat?'<span>'+kat.icon+' '+kat.label+'</span>':"")+'<span>'+fmtDate(d.doc_date||String(d.created_at).slice(0,10))+'</span>'+
+    (c?'<span>🔗 '+escapeHtml(c.anbieter||"Vertrag")+'</span>':'<span class="muted">ohne Vertrag</span>')+'</div></div>'+
+    '<div class="dact"><button class="ghost" data-action="doc-view" data-id="'+d.id+'">👁️ Ansehen</button>'+
+    '<button class="ghost" data-action="doc-link" data-id="'+d.id+'">🔗 Zuordnen</button>'+
+    '<button class="danger" data-action="doc-del" data-id="'+d.id+'">🗑️</button></div></div>';
+}
+function viewDocs(){
+  var kats={};DOCS.forEach(function(d){if(d.extracted&&d.extracted.kategorie)kats[d.extracted.kategorie]=1;});
+  var katOpts='<option value="">Alle Kategorien</option>'+Object.keys(kats).map(function(k){return '<option value="'+k+'"'+(docFilter.kat===k?" selected":"")+'>'+katInfo(k).icon+' '+katInfo(k).label+'</option>';}).join("");
+  var typOpts='<option value="">Alle Typen</option>'+Object.keys(DOCTYPE).map(function(k){return '<option value="'+k+'"'+(docFilter.typ===k?" selected":"")+'>'+DOCTYPE[k].label+'</option>';}).join("");
+  var list=DOCS.filter(function(d){
+    if(docFilter.typ&&d.doc_type!==docFilter.typ)return false;
+    if(docFilter.kat&&!(d.extracted&&d.extracted.kategorie===docFilter.kat))return false;
+    if(docFilter.q){var q=docFilter.q.toLowerCase();var hay=((d.filename||"")+" "+(d.zusammenfassung||"")+" "+JSON.stringify(d.extracted||{})).toLowerCase();if(hay.indexOf(q)<0)return false;}
+    return true;
+  });
+  var rows=list.length?list.map(docRow).join(""):'<p class="muted">Keine Dokumente'+(DOCS.length?" für diesen Filter":"")+'.</p>';
+  return '<div class="filterbar"><select id="df_kat">'+katOpts+'</select><select id="df_typ">'+typOpts+'</select><input type="text" id="df_q" placeholder="Suchen …" value="'+escapeHtml(docFilter.q)+'"></div>'+
+    '<section class="card">'+rows+'</section>'+
+    '<button class="bigadd" data-nav="add">➕ &nbsp;Weiteres Dokument hinzufügen</button>';
+}
+
+/* ---- Hinzufügen (Upload + Review) ---- */
+function viewAdd(){
+  var review="";
+  if(reviewDoc){
+    var ext=reviewDoc.extracted||null;
+    if(ext){
+      var t=dtInfo(reviewDoc.doc_type),k=ext.kategorie?katInfo(ext.kategorie):null;
+      var wichtig=(ext.wichtig&&ext.wichtig.length)?'<ul class="wichtig">'+ext.wichtig.map(function(w){return '<li>'+escapeHtml(w)+'</li>';}).join("")+'</ul>':"";
+      var match=findMatch(ext);
+      var actions='<div class="btnrow">';
+      if(match)actions+='<button class="primary" data-action="review-link" data-id="'+match.id+'">🔗 Zu „'+escapeHtml(match.anbieter||"Vertrag")+'“ zuordnen</button>';
+      actions+='<button class="'+(match?"ghost":"primary")+'" data-action="review-new">📑 Neuen Vertrag anlegen</button>';
+      actions+='<button class="ghost" data-action="review-done">Nur im Archiv ablegen</button></div>';
+      review='<section class="card"><h2 class="sect">🎩 Das hat der Butler gelesen</h2>'+
+        '<p><b>'+t.icon+' '+t.label+'</b>'+(k?' · '+k.icon+' '+k.label:"")+(ext.anbieter?' · '+escapeHtml(ext.anbieter):"")+'</p>'+
+        (ext.zusammenfassung?'<p style="margin:8px 0">'+escapeHtml(ext.zusammenfassung)+'</p>':"")+
+        wichtig+
+        (ext.hinweise?'<div class="ainote">💡 '+escapeHtml(ext.hinweise)+'</div>':"")+
+        (match?'<div class="ainote">🔍 Das passt vermutlich zu deinem bestehenden Vertrag <b>'+escapeHtml(match.anbieter||"?")+(match.produkt?" – "+escapeHtml(match.produkt):"")+'</b>.</div>':"")+
+        actions+'</section>';
+    }
+  }
+  return review+
+  '<section class="card"><h2 class="sect">➕ Dokument hinzufügen</h2>'+
+  '<p class="muted" style="margin-bottom:14px">PDF hochladen oder Brief abfotografieren – der Butler liest Laufzeit, Fristen, Preise und Kundennummern automatisch aus.</p>'+
+  '<div class="upzone">'+
+   '<button class="upbtn" data-action="pick-cam"><span class="uic">📷</span>Brief fotografieren<span class="usub">Kamera öffnet sich direkt</span></button>'+
+   '<button class="upbtn" data-action="pick-file"><span class="uic">📄</span>Datei auswählen<span class="usub">PDF, JPG oder PNG · auf Android auch aus Google Drive</span></button>'+
+  '</div>'+
+  '<input type="file" id="fileCam" accept="image/*" capture="environment" hidden>'+
+  '<input type="file" id="filePick" accept="application/pdf,image/*" hidden>'+
+  '<div id="aiWork" class="aiwork" hidden><span class="spin"></span><span class="aimsg">…</span></div>'+
+  '<p class="muted" style="font-size:.8rem;margin-top:14px">🔒 Deine Dokumente liegen verschlüsselt in deinem privaten Speicher und sind nur für deinen Haushalt sichtbar. Die KI-Analyse kostet weniger als 1 Cent pro Dokument.</p>'+
+  '</section>';
+}
+
+/* ---- Einstellungen ---- */
+function viewSettings(){
+  var email=escapeHtml(currentUser.email||"");
+  var opts=HOUSEHOLDS.map(function(h){
+    var active=(h.id===activeHousehold);
+    return '<button class="hhopt'+(active?" active":"")+'" data-action="hh-switch" data-id="'+h.id+'"><span class="hhname">'+escapeHtml(h.name||"Haushalt")+'</span><span class="hhtag">'+(active?"✓ aktiv":"wechseln")+'</span></button>';
+  }).join("");
+  var bytes=DOCS.reduce(function(s,d){return s+(d.size_bytes||0);},0);
+  var mb=bytes<1048576?Math.max(1,Math.round(bytes/1024))+" KB":(bytes/1048576).toLocaleString("de-DE",{maximumFractionDigits:1})+" MB";
+  if(!bytes)mb="0 KB";
+  return '<section class="card"><h2 class="sect">👤 Konto</h2>'+
+    '<p>Angemeldet als <b>'+email+'</b></p>'+
+    '<div class="acclabel accsep">'+(HOUSEHOLDS.length>1?"Deine Haushalte":"Dein Haushalt")+'</div>'+
+    '<div class="hhlist">'+opts+'</div>'+
+    '<p class="muted" id="hhMeta" style="font-size:.85rem;margin-top:8px"></p>'+
+    '<p class="muted" style="font-size:.8rem">Haushalte werden mit dem Verbrauchs-Tracker geteilt – gleiche Anmeldung, gleiche Mitglieder.</p>'+
+    '<button class="linkbtn" data-action="hh-rename" style="margin-top:12px">✏️ Aktuellen Haushalt umbenennen</button>'+
+    '<div class="acclabel accsep">👥 Person einladen</div>'+
+    '<button class="ghost" data-action="hh-invite">Einladungs-Code erstellen</button>'+
+    '<div id="inviteOut" class="inviteout" hidden></div>'+
+    '<div class="acclabel accsep">Einer Einladung beitreten</div>'+
+    '<div class="hhadd"><input id="hhJoinCode" type="text" maxlength="12" placeholder="Code eingeben"><button class="ghost" data-action="hh-join">Beitreten</button></div>'+
+  '</section>'+
+  '<section class="card"><h2 class="sect">💾 Daten</h2>'+
+    '<p class="muted" style="font-size:.9rem">Speicher belegt: <b>'+mb+'</b> ('+DOCS.length+(DOCS.length===1?" Dokument":" Dokumente")+')</p>'+
+    '<div class="btnrow"><button class="ghost" data-action="export-json">⬇️ Vertragsdaten exportieren (JSON)</button></div>'+
+  '</section>'+
+  '<section class="card"><h2 class="sect">ℹ️ Wie rechnet der Butler?</h2>'+
+    '<p class="muted" style="font-size:.9rem">Kündbar zum = Vertragsbeginn + Mindestlaufzeit. Letzter Kündigungstag = dieses Datum minus Kündigungsfrist. 🔴 = weniger als 30 Tage, 🟡 = weniger als 90 Tage. Für Verträge ab dem 1. März 2022 gilt das Gesetz für faire Verbraucherverträge: Nach der Mindestlaufzeit sind sie jederzeit mit höchstens 1 Monat Frist kündbar – der Butler berücksichtigt das automatisch.</p>'+
+  '</section>'+
+  '<button class="danger" data-action="logout" style="width:100%;padding:13px">Abmelden</button>';
+}
+function exportJSON(){
+  var data={exportiert:new Date().toISOString(),haushalt:activeHouseholdName(),contracts:CONTRACTS,documents:DOCS.map(function(d){var x={};for(var k in d)if(k!=="extracted")x[k]=d[k];return x;})};
+  var blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
+  var a=document.createElement("a");a.href=URL.createObjectURL(blob);a.download="dokumenten-butler-export.json";
+  document.body.appendChild(a);a.click();setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},400);
+  toast("Export erstellt ⬇️");
+}
+
+/* ---------- Auth (Muster aus Verbrauchs-Tracker) ---------- */
+function showAuth(show){document.body.classList.toggle("app-hidden",show);var a=$("#authscreen");if(a)a.hidden=!show;}
+function authMsg(text,kind){var m=$("#auth_msg");if(!m)return;if(!text){m.hidden=true;m.textContent="";return;}m.hidden=false;m.textContent=text;m.className="authmsg "+(kind||"");}
+function loginErrorText(e){var m=errMsg(e);if(/invalid login/i.test(m))return "E-Mail oder Passwort ist falsch.";if(/email not confirmed/i.test(m))return "Bitte bestätige zuerst deine E-Mail-Adresse (Link in der Bestätigungs-Mail).";if(/already registered|already been registered/i.test(m))return "Für diese E-Mail gibt es bereits ein Konto. Bitte melde dich an.";if(/rate limit|too many/i.test(m))return "Zu viele Versuche. Bitte kurz warten und erneut probieren.";return m;}
+async function doLogin(){
+  var email=($("#auth_email").value||"").trim(),pass=$("#auth_pass").value||"";
+  if(!email||!pass){authMsg("Bitte E-Mail und Passwort eingeben.","err");return;}
+  authMsg("Anmeldung läuft …","");
+  try{var r=await sb.auth.signInWithPassword({email:email,password:pass});if(r.error){authMsg(loginErrorText(r.error),"err");return;}authMsg("",null);}
+  catch(e){authMsg(loginErrorText(e),"err");}
+}
+async function doSignup(){
+  var email=($("#auth_email").value||"").trim(),pass=$("#auth_pass").value||"";
+  if(!email||!pass){authMsg("Bitte E-Mail und Passwort eingeben.","err");return;}
+  if(pass.length<6){authMsg("Das Passwort muss mindestens 6 Zeichen haben.","err");return;}
+  authMsg("Konto wird erstellt …","");
+  try{
+    var r=await sb.auth.signUp({email:email,password:pass});
+    if(r.error){authMsg(loginErrorText(r.error),"err");return;}
+    if(r.data&&r.data.session)authMsg("Konto erstellt – du wirst angemeldet …","ok");
+    else authMsg("Konto erstellt. Bitte bestätige die E-Mail, die wir dir geschickt haben, und melde dich anschließend an.","ok");
+  }catch(e){authMsg(loginErrorText(e),"err");}
+}
+async function doLogout(){try{await sb.auth.signOut();}catch(e){}authMsg("",null);var p=$("#auth_pass");if(p)p.value="";}
+var pendingRecovery=(/type=recovery/i.test(location.hash)||/[?&]type=recovery/i.test(location.search));
+function showResetMode(on){
+  var lp=$("#auth_login_panel"),rp=$("#auth_reset_panel"),sub=$("#auth_sub");
+  if(lp)lp.hidden=on;if(rp)rp.hidden=!on;
+  if(sub)sub.textContent=on?"Bitte vergib jetzt dein neues Passwort.":"Bitte melde dich an – dein Butler kümmert sich um den Papierkram.";
+}
+async function doForgot(){
+  var email=($("#auth_email").value||"").trim();
+  if(!email){authMsg("Bitte zuerst deine E-Mail-Adresse oben eingeben.","err");return;}
+  authMsg("E-Mail wird gesendet …","");
+  try{
+    var r=await sb.auth.resetPasswordForEmail(email,{redirectTo:location.origin+location.pathname});
+    if(r.error){authMsg(loginErrorText(r.error),"err");return;}
+    authMsg("Wir haben dir eine E-Mail zum Zurücksetzen geschickt. Bitte klicke den Link darin an.","ok");
+  }catch(e){authMsg(loginErrorText(e),"err");}
+}
+async function doSetPassword(){
+  var p=$("#auth_newpass").value||"";
+  if(p.length<6){authMsg("Das Passwort muss mindestens 6 Zeichen haben.","err");return;}
+  authMsg("Passwort wird gespeichert …","");
+  try{
+    var r=await sb.auth.updateUser({password:p});
+    if(r.error){authMsg(loginErrorText(r.error),"err");return;}
+    pendingRecovery=false;showResetMode(false);
+    authMsg("Passwort geändert ✅ Du wirst angemeldet …","ok");
+    var s=await sb.auth.getSession();
+    if(s&&s.data&&s.data.session)handleSession(s.data.session);
+  }catch(e){authMsg(loginErrorText(e),"err");}
+}
+function enterRecovery(session){
+  currentUser=session?session.user:null;enteredUserId=null;
+  showAuth(true);showResetMode(true);
+  var p=$("#auth_newpass");if(p)p.value="";
+  authMsg("Du kannst jetzt ein neues Passwort vergeben.","ok");
+}
+
+/* ---------- Haushalte (geteilt mit Verbrauchs-Tracker) ---------- */
+function hhKey(){return "db_active_hh_"+(currentUser?currentUser.id:"anon");}
+function activeHouseholdName(){var h=HOUSEHOLDS.find(function(x){return x.id===activeHousehold;});return h?(h.name||"Haushalt"):"";}
+async function loadHouseholds(){
+  var r=await sbPub.from("households").select("id,name,created_at").order("created_at",{ascending:true});
+  HOUSEHOLDS=(r&&!r.error&&r.data)?r.data:[];
+  var saved=null;try{saved=localStorage.getItem(hhKey());}catch(e){}
+  if(saved&&HOUSEHOLDS.some(function(h){return h.id===saved;}))activeHousehold=saved;
+  else activeHousehold=HOUSEHOLDS.length?HOUSEHOLDS[0].id:null;
+  if(!activeHousehold){
+    try{var c=await sbPub.rpc("create_household",{p_name:"Mein Haushalt"});if(c&&!c.error&&c.data){activeHousehold=c.data;var r2=await sbPub.from("households").select("id,name,created_at");HOUSEHOLDS=(r2&&r2.data)||[];}}catch(e){}
+  }
+  try{if(activeHousehold)localStorage.setItem(hhKey(),activeHousehold);}catch(e){}
+}
+async function refreshHhMeta(){
+  var el=$("#hhMeta");if(!el||!activeHousehold)return;
+  try{
+    var r=await sbPub.rpc("household_members_emails",{p_household_id:activeHousehold});
+    var emails=(r&&!r.error&&Array.isArray(r.data))?r.data.map(function(x){return x.email;}):[];
+    if(emails.length>1)el.innerHTML='👨‍👩‍👧 '+emails.length+' Mitglieder: '+emails.map(function(e){return escapeHtml(e);}).join(", ");
+    else el.textContent="Nur du nutzt diesen Haushalt.";
+  }catch(e){el.textContent="";}
+}
+async function switchHousehold(hid){
+  if(!hid||hid===activeHousehold)return;
+  activeHousehold=hid;try{localStorage.setItem(hhKey(),hid);}catch(e){}
+  try{await loadFromDB();}catch(e){toast("Daten konnten nicht geladen werden: "+errMsg(e),true);}
+  renderApp();toast("Haushalt gewechselt: "+activeHouseholdName()+" ✅");
+}
+async function renameHouseholdUI(){
+  var cur=HOUSEHOLDS.find(function(h){return h.id===activeHousehold;});
+  var name=prompt("Neuer Name für den Haushalt:",cur?cur.name:"");
+  if(name==null)return;name=name.trim();if(!name)return;
+  try{
+    var r=await sbPub.from("households").update({name:name}).eq("id",activeHousehold);
+    if(r.error)throw r.error;
+    await loadHouseholds();renderApp();toast("Haushalt umbenannt ✅");
+  }catch(e){toast("Umbenennen fehlgeschlagen: "+errMsg(e),true);}
+}
+async function inviteUI(){
+  if(!activeHousehold)return;
+  try{
+    var r=await sbPub.rpc("create_invite",{p_household_id:activeHousehold});
+    if(r.error)throw r.error;
+    var code=r.data,out=$("#inviteOut");
+    if(out){out.hidden=false;out.innerHTML='<div>Code: <b class="invcode">'+code+'</b><button class="invcopy" data-action="hh-copy" data-code="'+code+'">Kopieren</button></div>'+
+      '<p class="invhint">Gib diesen Code weiter. Die Person meldet sich an und trägt ihn unter „Einer Einladung beitreten“ ein. Gültig 14 Tage, einmalig nutzbar.</p>';}
+  }catch(e){toast("Konnte Einladung nicht erstellen: "+errMsg(e),true);}
+}
+function copyInvite(code){if(!code)return;try{navigator.clipboard.writeText(code).then(function(){toast("Code kopiert ✅");},function(){toast("Code: "+code);});}catch(e){toast("Code: "+code);}}
+async function joinUI(){
+  var inp=$("#hhJoinCode"),code=inp?(inp.value||"").trim():"";
+  if(!code){toast("Bitte den Einladungs-Code eingeben.",true);if(inp)inp.focus();return;}
+  try{
+    var r=await sbPub.rpc("redeem_invite",{p_code:code});
+    if(r.error)throw r.error;
+    await loadHouseholds();
+    await switchHousehold(r.data);
+    toast("Haushalt beigetreten ✅");
+  }catch(e){var m=errMsg(e);if(/invalid_or_expired/i.test(m))m="Code ungültig oder abgelaufen.";toast(m,true);}
+}
+
+/* ---------- Session ---------- */
+async function enterApp(session){
+  currentUser=session.user;showAuth(false);
+  try{await loadHouseholds();}catch(e){}
+  try{await loadFromDB();}catch(e){toast("Daten konnten nicht geladen werden: "+errMsg(e),true);}
+  renderApp();
+}
+function handleSession(session){
+  if(session&&session.user){
+    if(enteredUserId===session.user.id){currentUser=session.user;return;}
+    enteredUserId=session.user.id;enterApp(session);
+  }else{
+    enteredUserId=null;currentUser=null;CONTRACTS=[];DOCS=[];HOUSEHOLDS=[];activeHousehold=null;
+    var app=$("#app");if(app)app.innerHTML="";
+    showAuth(true);
+  }
+}
+
+/* ---------- Theme ---------- */
+function applyTheme(dark){
+  document.body.classList.toggle("dark",!!dark);
+  var b=$("#themeBtn");if(b)b.textContent=dark?"☀️":"🌙";
+  var tc=document.querySelector('meta[name="theme-color"]');if(tc)tc.setAttribute("content",dark?"#09090b":"#1d4ed8");
+  try{localStorage.setItem("dbTheme",dark?"dark":"light");}catch(e){}
+}
+
+/* ---------- Events ---------- */
+function onAppClick(e){
+  var nav=e.target.closest("[data-nav]");
+  if(nav){if(nav.dataset.nav==="add")reviewDoc=null;go(nav.dataset.nav);return;}
+  var b=e.target.closest("[data-action]");if(!b)return;
+  var act=b.dataset.action,id=b.dataset.id;
+  if(act==="open-contract"){detailId=id;activeView="contract-detail";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
+  else if(act==="new-contract"){editId=null;formPrefill=null;pendingDoc=null;activeView="contract-form";renderApp();}
+  else if(act==="edit-contract"){editId=id;formPrefill=null;activeView="contract-form";renderApp();}
+  else if(act==="save-contract")onSaveContract();
+  else if(act==="del-contract")deleteContract(id);
+  else if(act==="mark-cancelled")setContractStatus(id,"gekuendigt");
+  else if(act==="mark-active")setContractStatus(id,"aktiv");
+  else if(act==="ics"){var c=contractById(id);if(c)icsDownload(c);}
+  else if(act==="doc-view")viewDoc(id);
+  else if(act==="doc-del")deleteDoc(id);
+  else if(act==="doc-link")docLinkUI(id);
+  else if(act==="pick-cam"){var fc=$("#fileCam");if(fc)fc.click();}
+  else if(act==="pick-file"){var fp=$("#filePick");if(fp)fp.click();}
+  else if(act==="review-link"){if(reviewDoc)linkDoc(reviewDoc.id,id).then(function(){reviewDoc=null;detailId=id;activeView="contract-detail";renderApp();});}
+  else if(act==="review-new"){
+    if(reviewDoc){formPrefill=reviewDoc.extracted||null;pendingDoc=reviewDoc.id;reviewDoc=null;}
+    editId=null;activeView="contract-form";renderApp();
+  }
+  else if(act==="review-done"){reviewDoc=null;go("docs");toast("Im Archiv abgelegt ✅");}
+  else if(act==="hh-switch")switchHousehold(id);
+  else if(act==="hh-rename")renameHouseholdUI();
+  else if(act==="hh-invite")inviteUI();
+  else if(act==="hh-copy")copyInvite(b.dataset.code);
+  else if(act==="hh-join")joinUI();
+  else if(act==="export-json")exportJSON();
+  else if(act==="logout")doLogout();
+}
+function docLinkUI(docId){
+  if(!CONTRACTS.length){toast("Lege zuerst einen Vertrag an, dann kannst du zuordnen.",true);return;}
+  var d=DOCS.find(function(x){return x.id===docId;});if(!d)return;
+  var list=CONTRACTS.map(function(c,i){return (i+1)+" = "+(c.anbieter||"?")+(c.produkt?" ("+c.produkt+")":"");}).join("\n");
+  var input=prompt("Welchem Vertrag zuordnen?\n\n"+list+"\n\n0 = Zuordnung entfernen",d.contract_id?"":"1");
+  if(input===null)return;
+  var n=parseInt(input,10);
+  if(n===0){linkDoc(docId,null);return;}
+  if(!n||n<1||n>CONTRACTS.length){toast("Ungültige Auswahl.",true);return;}
+  linkDoc(docId,CONTRACTS[n-1].id);
+}
+function onAppChange(e){
+  if(e.target.id==="fileCam"||e.target.id==="filePick"){
+    var f=e.target.files&&e.target.files[0];e.target.value="";
+    if(f)onAddFile(f);
+  }
+  else if(e.target.id==="df_kat"){docFilter.kat=e.target.value;renderApp();}
+  else if(e.target.id==="df_typ"){docFilter.typ=e.target.value;renderApp();}
+}
+function onAppInput(e){
+  if(e.target.id==="df_q"){docFilter.q=e.target.value;
+    clearTimeout(onAppInput._t);onAppInput._t=setTimeout(function(){var el=$("#df_q");var pos=el?el.selectionStart:0;renderApp();var el2=$("#df_q");if(el2){el2.focus();el2.setSelectionRange(pos,pos);}},350);}
+}
+
+/* ---------- Init ---------- */
+function init(){
+  var saved="";try{saved=localStorage.getItem("dbTheme")||"";}catch(e){}
+  if(!saved)saved=(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";
+  applyTheme(saved==="dark");
+  var tb=$("#themeBtn");if(tb)tb.addEventListener("click",function(){applyTheme(!document.body.classList.contains("dark"));});
+  var app=$("#app");
+  app.addEventListener("click",onAppClick);
+  app.addEventListener("change",onAppChange);
+  app.addEventListener("input",onAppInput);
+  function onNav(e){var b=e.target.closest("[data-nav]");if(b){if(b.dataset.nav==="add")reviewDoc=null;go(b.dataset.nav);}}
+  var t=$("#tabs");if(t)t.addEventListener("click",onNav);
+  var tf=$("#tabsFoot");if(tf)tf.addEventListener("click",onNav);
+  var tm=$("#tabsMobile");if(tm)tm.addEventListener("click",onNav);
+  $("#auth_login").addEventListener("click",doLogin);
+  $("#auth_signup").addEventListener("click",doSignup);
+  $("#auth_forgot").addEventListener("click",doForgot);
+  $("#auth_setpass").addEventListener("click",doSetPassword);
+  $("#auth_pass").addEventListener("keydown",function(e){if(e.key==="Enter")doLogin();});
+  sb.auth.onAuthStateChange(function(event,session){
+    if(event==="PASSWORD_RECOVERY"){enterRecovery(session);return;}
+    if(pendingRecovery&&session){enterRecovery(session);return;}
+    handleSession(session);
+  });
+  sb.auth.getSession().then(function(r){
+    var session=r&&r.data?r.data.session:null;
+    if(pendingRecovery&&session){enterRecovery(session);return;}
+    handleSession(session);
+  });
+  if("serviceWorker" in navigator){try{navigator.serviceWorker.register("sw.js");}catch(e){}}
+}
+document.addEventListener("DOMContentLoaded",init);
+})();
+</script>
+</body>
+</html>
