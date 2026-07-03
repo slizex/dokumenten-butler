@@ -159,6 +159,31 @@ textarea{min-height:74px;resize:vertical}
 .wichtig{margin:8px 0 0;padding-left:20px;font-size:.9rem}
 .wichtig li{margin:3px 0}
 
+/* ---- Personen / Mandanten ---- */
+.personbar{display:flex;gap:8px;overflow-x:auto;padding:2px 0 12px;margin:0 0 4px;-webkit-overflow-scrolling:touch}
+.pchip{flex:none;display:inline-flex;align-items:center;gap:7px;padding:7px 13px;border:1px solid var(--border);border-radius:99px;background:var(--panel);color:var(--fg);font:inherit;font-size:.85rem;font-weight:500;cursor:pointer;white-space:nowrap}
+.pchip:hover{background:var(--panel2)}
+.pchip.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);font-weight:600}
+.pdot{width:11px;height:11px;border-radius:50%;flex:none;background:var(--muted2)}
+.pbadge{display:inline-flex;align-items:center;gap:5px;padding:2px 9px;border-radius:99px;font-size:.75rem;font-weight:600;background:var(--panel2);color:var(--fg)}
+.pbadge .pdot{width:8px;height:8px}
+.personmgr{display:flex;flex-direction:column;gap:8px}
+.prow{display:flex;align-items:center;gap:10px;padding:9px 12px;border:1px solid var(--border);border-radius:9px}
+.prow .pname{flex:1;font-weight:600;display:flex;align-items:center;gap:8px}
+.prow button{flex:none;font-size:.8rem;padding:5px 10px}
+
+/* ---- Rechnungs-Verlauf ---- */
+.invrow{display:flex;align-items:center;gap:12px;padding:10px 4px;border-bottom:1px solid var(--border);font-size:.9rem}
+.invrow:last-child{border-bottom:none}
+.invp{flex:1;min-width:0}
+.invper{font-weight:600}
+.invd{font-size:.8rem;color:var(--muted)}
+.invb{flex:none;font-weight:650;text-align:right}
+.invdelta{font-size:.78rem;font-weight:600;margin-left:8px}
+.invdelta.up{color:var(--neg)}.invdelta.down{color:var(--pos)}.invdelta.same{color:var(--muted2)}
+.invmini{display:flex;align-items:flex-end;gap:3px;height:34px;margin:6px 0 2px}
+.invmini .imb{flex:1;background:color-mix(in srgb,var(--accent) 40%,transparent);border-radius:2px 2px 0 0;min-height:3px}
+
 /* ---- Butler-Tipps / Kosten-Aufschlüsselung ---- */
 .tiprow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 4px;border-bottom:1px solid var(--border);font-size:.9rem}
 .tiprow:last-child{border-bottom:none}
@@ -307,14 +332,17 @@ var NEUES_RECHT_AB="2022-03-01";
 /* ---------- Zustand ---------- */
 var currentUser=null,enteredUserId=null;
 var HOUSEHOLDS=[],activeHousehold=null;
-var CONTRACTS=[],DOCS=[];
+var CONTRACTS=[],DOCS=[],PERSONS=[];
 var activeView="dashboard";
+var activePerson="";        /* Personen-Filter: "" = alle */
 var detailId=null;          /* geöffneter Vertrag */
 var editId=null;            /* Vertrag im Bearbeiten-Formular */
 var formPrefill=null;       /* Vorbefüllung des Vertragsformulars (aus KI) */
+var formPerson="";          /* vorgewählte Person fürs Formular */
 var pendingDoc=null;        /* zuletzt hochgeladenes Dokument (fürs Verknüpfen) */
 var reviewDoc=null;         /* Dokument im KI-Review */
 var docFilter={kat:"",typ:"",q:""};
+var PERSON_COLORS=["#1d4ed8","#0891b2","#7c3aed","#c026d3","#db2777","#ea580c","#65a30d","#0d9488"];
 
 /* ---------- Helfer ---------- */
 function $(s){return document.querySelector(s);}
@@ -416,15 +444,79 @@ function icsEsc(s){return String(s).replace(/\\/g,"\\\\").replace(/;/g,"\\;").re
 
 /* ---------- Datenzugriff ---------- */
 async function loadFromDB(){
-  if(!activeHousehold){CONTRACTS=[];DOCS=[];return;}
+  if(!activeHousehold){CONTRACTS=[];DOCS=[];PERSONS=[];return;}
+  var rp=await sb.from("persons").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:true});
+  PERSONS=(rp&&!rp.error&&rp.data)?rp.data:[];
   var rc=await sb.from("contracts").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:false});
   if(rc.error)throw rc.error;
   CONTRACTS=rc.data||[];
   var rd=await sb.from("documents").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:false});
   if(rd.error)throw rd.error;
   DOCS=rd.data||[];
+  if(activePerson&&!PERSONS.some(function(p){return p.id===activePerson;}))activePerson="";
 }
 function contractById(id){return CONTRACTS.find(function(c){return c.id===id;})||null;}
+
+/* ---------- Personen / Mandanten ---------- */
+function personById(id){return PERSONS.find(function(p){return p.id===id;})||null;}
+function personColor(p){return (p&&p.farbe)?p.farbe:"#71717a";}
+function normName(s){return String(s||"").trim().toLowerCase().replace(/\s+/g," ");}
+function matchPerson(name){
+  var n=normName(name);if(!n)return null;
+  var exact=PERSONS.find(function(p){return normName(p.name)===n;});
+  if(exact)return exact;
+  /* Nachname-/Teilstring-Treffer (z. B. "Andreas Kais" ~ "Andreas") */
+  return PERSONS.find(function(p){var pn=normName(p.name);return pn&&(n.indexOf(pn)>=0||pn.indexOf(n)>=0);})||null;
+}
+function personBadge(id){
+  var p=personById(id);if(!p)return "";
+  return '<span class="pbadge"><span class="pdot" style="background:'+personColor(p)+'"></span>'+escapeHtml(p.name)+'</span>';
+}
+function personBar(){
+  if(PERSONS.length<1)return "";
+  var chips='<button class="pchip'+(activePerson===""?" on":"")+'" data-action="pfilter" data-id=""><span class="pdot" style="background:var(--muted2)"></span>Alle</button>';
+  chips+=PERSONS.map(function(p){
+    return '<button class="pchip'+(activePerson===p.id?" on":"")+'" data-action="pfilter" data-id="'+p.id+'"><span class="pdot" style="background:'+personColor(p)+'"></span>'+escapeHtml(p.name)+'</button>';
+  }).join("");
+  return '<div class="personbar">'+chips+'</div>';
+}
+function filterPerson(list){
+  if(!activePerson)return list;
+  return list.filter(function(x){return x.person_id===activePerson;});
+}
+async function createPerson(name){
+  name=(name||"").trim();if(!name)return null;
+  var farbe=PERSON_COLORS[PERSONS.length%PERSON_COLORS.length];
+  var r=await sb.from("persons").insert({household_id:activeHousehold,name:name,farbe:farbe}).select("*").single();
+  if(r.error)throw r.error;
+  return r.data;
+}
+async function createPersonUI(){
+  var name=prompt("Name der Person (z. B. Elena Kais):","");
+  if(name==null)return;name=name.trim();if(!name)return;
+  try{await createPerson(name);await loadFromDB();renderApp();toast("Person „"+name+"“ angelegt ✅");}
+  catch(e){toast("Anlegen fehlgeschlagen: "+errMsg(e),true);}
+}
+async function renamePersonUI(id){
+  var p=personById(id);if(!p)return;
+  var name=prompt("Name ändern:",p.name);if(name==null)return;name=name.trim();if(!name)return;
+  try{var r=await sb.from("persons").update({name:name}).eq("id",id);if(r.error)throw r.error;await loadFromDB();renderApp();toast("Person umbenannt ✅");}
+  catch(e){toast("Umbenennen fehlgeschlagen: "+errMsg(e),true);}
+}
+async function deletePersonUI(id){
+  var p=personById(id);if(!p)return;
+  var n=CONTRACTS.filter(function(c){return c.person_id===id;}).length+DOCS.filter(function(d){return d.person_id===id;}).length;
+  if(!confirm("Person „"+p.name+"“ löschen?"+(n?" "+n+" Verträge/Dokumente verlieren die Zuordnung (bleiben erhalten).":"")))return;
+  try{var r=await sb.from("persons").delete().eq("id",id);if(r.error)throw r.error;if(activePerson===id)activePerson="";await loadFromDB();renderApp();toast("Person gelöscht ✅");}
+  catch(e){toast("Löschen fehlgeschlagen: "+errMsg(e),true);}
+}
+async function setContractPerson(contractId,personId){
+  try{var r=await sb.from("contracts").update({person_id:personId||null}).eq("id",contractId);if(r.error)throw r.error;
+    /* zugeordnete Dokumente ohne eigene Person erben die Vertragsperson */
+    try{await sb.from("documents").update({person_id:personId||null}).eq("contract_id",contractId).is("person_id",null);}catch(e){}
+    await loadFromDB();renderApp();toast(personId?"Person zugeordnet ✅":"Personen-Zuordnung entfernt ✅");}
+  catch(e){toast("Zuordnen fehlgeschlagen: "+errMsg(e),true);}
+}
 async function saveContractData(cols,id){
   if(id){var r=await sb.from("contracts").update(cols).eq("id",id);if(r.error)throw r.error;return id;}
   cols.household_id=activeHousehold;
@@ -479,55 +571,200 @@ function compressImage(file){
     img.src=url;
   });
 }
+function isEmlFile(file){return file.type==="message/rfc822"||/\.eml$/i.test(file.name||"");}
 async function onAddFile(file){
   if(!file)return;
   if(!activeHousehold){toast("Kein Haushalt aktiv.",true);return;}
+  if(isEmlFile(file)){return onAddEmail(file);}
   var isPdf=file.type==="application/pdf"||/\.pdf$/i.test(file.name||"");
-  if(!isPdf&&!ALLOWED_IMG[file.type]&&!/^image\//.test(file.type)){toast("Bitte ein PDF oder Foto (JPG/PNG) auswählen.",true);return;}
+  if(!isPdf&&!ALLOWED_IMG[file.type]&&!/^image\//.test(file.type)){toast("Bitte ein PDF, Foto (JPG/PNG) oder eine E-Mail (.eml) auswählen.",true);return;}
   if(isPdf&&file.size>12*1024*1024){toast("Das PDF ist größer als 12 MB – bitte eine kleinere Datei verwenden.",true);return;}
   showAiWork("Dokument wird vorbereitet …");
   var blob=file,mime=file.type||"application/pdf",fname=file.name||("scan-"+Date.now()+".jpg");
   try{
     if(!isPdf){blob=await compressImage(file);mime="image/jpeg";fname=fname.replace(/\.[^.]+$/,"")+".jpg";}
   }catch(e){hideAiWork();toast(errMsg(e),true);return;}
-  /* 1) Ins Archiv hochladen (best effort, wie beim Tracker) */
+  await ingest({blob:blob,mime:mime,fname:fname});
+}
+/* E-Mail: .eml parsen, PDF-/Bild-Anhang bevorzugt analysieren, sonst den Text-Body */
+async function onAddEmail(file){
+  if(file.size>20*1024*1024){toast("Die E-Mail ist größer als 20 MB – bitte kleiner.",true);return;}
+  showAiWork("E-Mail wird gelesen …");
+  var raw="";
+  try{raw=await file.text();}catch(e){hideAiWork();toast("E-Mail konnte nicht gelesen werden.",true);return;}
+  var mail;
+  try{mail=parseEml(raw);}catch(e){mail={text:raw,attachments:[],subject:""};}
+  var att=(mail.attachments||[]).filter(function(a){return a.mime==="application/pdf"||/^image\//.test(a.mime);});
+  var emlName=(file.name||"email.eml");
+  if(att.length){
+    var a=att[0];
+    var extra=att.length>1?" (E-Mail hatte "+att.length+" Anhänge – der erste wird analysiert)":"";
+    var isImg=/^image\//.test(a.mime);
+    var blob=new Blob([a.bytes],{type:a.mime}),mime=a.mime,fname=a.filename||("anhang"+(a.mime==="application/pdf"?".pdf":".bin"));
+    try{if(isImg&&a.mime!=="image/jpeg"){/* Bilder unkomprimiert lassen, PNG/JPG akzeptiert die KI direkt */}}catch(e){}
+    toast("📧 Anhang aus E-Mail erkannt: "+fname+extra);
+    await ingest({blob:blob,mime:mime,fname:fname,emailFrom:emlName,emailSubject:mail.subject});
+  }else{
+    /* kein Anhang → E-Mail-Text analysieren, Original .eml archivieren */
+    var body=(mail.text||raw||"").trim();
+    if(!body){hideAiWork();toast("In der E-Mail war kein lesbarer Inhalt.",true);return;}
+    var emlBlob=new Blob([raw],{type:"message/rfc822"});
+    await ingest({blob:emlBlob,mime:"message/rfc822",fname:emlName,textContent:body,emailSubject:mail.subject});
+  }
+}
+/* Gemeinsamer Kern: Datei ins Archiv, KI-Analyse, Ergebnis speichern, Review öffnen.
+   opts: {blob,mime,fname,textContent?,emailFrom?,emailSubject?} */
+async function ingest(opts){
   showAiWork("Dokument wird sicher abgelegt …");
   var docRow=null;
   try{
-    var safe=fname.replace(/[^\wäöüÄÖÜß.\-]+/g,"_").slice(-80);
+    var safe=(opts.fname||"dokument").replace(/[^\wäöüÄÖÜß.\-]+/g,"_").slice(-80);
     var path=activeHousehold+"/"+Date.now()+"_"+safe;
-    var up=await sb.storage.from(BUCKET).upload(path,blob,{contentType:mime,upsert:false});
+    var up=await sb.storage.from(BUCKET).upload(path,opts.blob,{contentType:opts.mime,upsert:false});
     if(up.error)throw up.error;
-    var ins=await sb.from("documents").insert({household_id:activeHousehold,filename:fname,storage_path:path,mime_type:mime,size_bytes:blob.size,doc_type:"sonstiges"}).select("*").single();
+    var note=opts.emailSubject?("Aus E-Mail: "+opts.emailSubject):(opts.emailFrom?"Aus E-Mail-Anhang":null);
+    var ins=await sb.from("documents").insert({household_id:activeHousehold,filename:opts.fname,storage_path:path,mime_type:opts.mime,size_bytes:opts.blob.size,doc_type:"sonstiges",note:note}).select("*").single();
     if(ins.error)throw ins.error;
     docRow=ins.data;
   }catch(e){hideAiWork();toast("Ablegen fehlgeschlagen: "+errMsg(e),true);return;}
-  /* 2) KI liest das Dokument */
   showAiWork("🎩 Der Butler liest das Dokument … (KI, ca. 10–30 Sek.)");
   var ext=null;
   try{
-    var b64=await fileToBase64(blob);
-    var r=await sb.functions.invoke(EDGE_FN,{body:{fileBase64:b64,mimeType:mime}});
+    var reqBody;
+    if(opts.textContent){reqBody={textContent:opts.textContent};}
+    else{reqBody={fileBase64:await blobToBase64(opts.blob),mimeType:opts.mime};}
+    var r=await sb.functions.invoke(EDGE_FN,{body:reqBody});
     if(r.error)throw r.error;
     var body=r.data||{};
     if(body.error)throw new Error(body.error);
     ext=body.dokument||null;
   }catch(e){
-    hideAiWork();
-    await loadFromDB();
-    reviewDoc=null;
+    hideAiWork();await loadFromDB();reviewDoc=null;
     toast("Das Dokument wurde abgelegt, aber die KI-Analyse schlug fehl: "+errMsg(e),true);
     go("docs");return;
   }
-  /* 3) Ergebnis am Dokument speichern */
   try{
+    var pm=(ext&&ext.vertragspartner)?matchPerson(ext.vertragspartner):null;
     var upd={extracted:ext,doc_type:(ext&&DOCTYPE[ext.docType])?ext.docType:"sonstiges",doc_date:(ext&&ext.datum)||null,zusammenfassung:(ext&&ext.zusammenfassung)||null};
+    if(pm)upd.person_id=pm.id;
+    else if(activePerson)upd.person_id=activePerson;
     var ru=await sb.from("documents").update(upd).eq("id",docRow.id);if(ru.error)throw ru.error;
   }catch(e){}
   hideAiWork();
   await loadFromDB();
   reviewDoc=DOCS.find(function(d){return d.id===docRow.id;})||docRow;
-  renderApp();
+  activeView="add";renderApp();
+}
+function blobToBase64(blob){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){var s=String(r.result||"");var i=s.indexOf(",");res(i>=0?s.slice(i+1):s);};r.onerror=function(){rej(new Error("Datei konnte nicht gelesen werden."));};r.readAsDataURL(blob);});}
+
+/* ---------- Minimaler MIME-/E-Mail-Parser (clientseitig) ---------- */
+function parseEml(raw){
+  var top=splitHeaderBody(raw);
+  var headers=parseHeaders(top.head);
+  var subject=decodeMimeWords(headers["subject"]||"");
+  var out={subject:subject,text:"",html:"",attachments:[]};
+  walkMimePart(headers,top.body,out);
+  if(!out.text&&out.html)out.text=htmlToText(out.html);
+  return out;
+}
+function splitHeaderBody(s){
+  var i=s.indexOf("\r\n\r\n");var sep=4;
+  if(i<0){i=s.indexOf("\n\n");sep=2;}
+  if(i<0)return {head:s,body:""};
+  return {head:s.slice(0,i),body:s.slice(i+sep)};
+}
+function parseHeaders(head){
+  var lines=head.split(/\r?\n/),h={},cur=null;
+  lines.forEach(function(l){
+    if(/^[ \t]/.test(l)&&cur){h[cur]+=" "+l.trim();return;}
+    var m=l.match(/^([!-9;-~]+):\s?(.*)$/);
+    if(m){cur=m[1].toLowerCase();h[cur]=(h[cur]?h[cur]+" ":"")+m[2];}
+  });
+  return h;
+}
+function headerParam(val,name){
+  if(!val)return "";
+  var m=val.match(new RegExp(name+'\\s*=\\s*"([^"]*)"','i'))||val.match(new RegExp(name+'\\s*=\\s*([^;\\s]+)','i'));
+  return m?m[1]:"";
+}
+function walkMimePart(headers,body,out){
+  var ct=(headers["content-type"]||"text/plain").toLowerCase();
+  var cte=(headers["content-transfer-encoding"]||"").toLowerCase().trim();
+  var disp=(headers["content-disposition"]||"").toLowerCase();
+  var fname=decodeMimeWords(headerParam(headers["content-disposition"],"filename")||headerParam(headers["content-type"],"name"));
+  if(ct.indexOf("multipart/")===0){
+    var boundary=headerParam(headers["content-type"],"boundary");
+    if(!boundary)return;
+    var parts=splitMultipart(body,boundary);
+    parts.forEach(function(p){
+      var sub=splitHeaderBody(p);
+      walkMimePart(parseHeaders(sub.head),sub.body,out);
+    });
+    return;
+  }
+  var isAttachment=disp.indexOf("attachment")>=0||!!fname||(ct.indexOf("application/")===0&&ct.indexOf("application/pkcs7")<0);
+  if(ct.indexOf("text/plain")===0&&!isAttachment){out.text+=(out.text?"\n":"")+decodeText(body,cte,ct);return;}
+  if(ct.indexOf("text/html")===0&&!isAttachment){out.html+=decodeText(body,cte,ct);return;}
+  /* Anhang */
+  var mime=ct.split(";")[0].trim()||"application/octet-stream";
+  if(mime==="application/pdf"||/^image\//.test(mime)||isAttachment){
+    var bytes=(cte==="base64")?base64ToBytes(body):new TextEncoder().encode(body);
+    out.attachments.push({filename:fname||("anhang."+(mime==="application/pdf"?"pdf":(mime.split("/")[1]||"bin"))),mime:mime,bytes:bytes});
+  }
+}
+function splitMultipart(body,boundary){
+  var b="--"+boundary;
+  var chunks=body.split(b);
+  var parts=[];
+  chunks.forEach(function(c){
+    if(c===""||/^--\s*$/.test(c.trim().slice(0,4)))return;
+    if(c.slice(0,2)==="--")return; /* Abschluss */
+    var t=c.replace(/^\r?\n/,"").replace(/\r?\n$/,"");
+    if(t.trim())parts.push(t);
+  });
+  return parts;
+}
+function decodeText(body,cte,ct){
+  var charset=(headerParam(ct,"charset")||"utf-8").toLowerCase();
+  var bytes;
+  if(cte==="base64")bytes=base64ToBytes(body);
+  else if(cte==="quoted-printable")bytes=qpToBytes(body);
+  else return body;
+  try{return new TextDecoder(charset).decode(bytes);}catch(e){try{return new TextDecoder("utf-8").decode(bytes);}catch(e2){return body;}}
+}
+function base64ToBytes(s){
+  var clean=(s||"").replace(/[^A-Za-z0-9+/=]/g,"");
+  try{var bin=atob(clean);var arr=new Uint8Array(bin.length);for(var i=0;i<bin.length;i++)arr[i]=bin.charCodeAt(i);return arr;}
+  catch(e){return new Uint8Array(0);}
+}
+function qpToBytes(s){
+  s=(s||"").replace(/=\r?\n/g,""); /* Soft-Line-Breaks */
+  var out=[];
+  for(var i=0;i<s.length;i++){
+    var ch=s[i];
+    if(ch==="="&&i+2<s.length){var hex=s.substr(i+1,2);if(/^[0-9A-Fa-f]{2}$/.test(hex)){out.push(parseInt(hex,16));i+=2;continue;}}
+    out.push(ch.charCodeAt(0)&0xff);
+  }
+  return new Uint8Array(out);
+}
+function decodeMimeWords(s){
+  if(!s)return "";
+  return s.replace(/=\?([^?]+)\?([BbQq])\?([^?]*)\?=/g,function(_,cs,enc,txt){
+    try{
+      var bytes;
+      if(/b/i.test(enc))bytes=base64ToBytes(txt);
+      else bytes=qpToBytes(txt.replace(/_/g," "));
+      return new TextDecoder(cs).decode(bytes);
+    }catch(e){return txt;}
+  }).replace(/\s+/g," ").trim();
+}
+function htmlToText(html){
+  var s=String(html||"");
+  s=s.replace(/<style[\s\S]*?<\/style>/gi,"").replace(/<script[\s\S]*?<\/script>/gi,"");
+  s=s.replace(/<\/(p|div|tr|h[1-6]|li)>/gi,"\n").replace(/<br\s*\/?>/gi,"\n");
+  s=s.replace(/<[^>]+>/g," ");
+  var ta=document.createElement("textarea");ta.innerHTML=s;s=ta.value;
+  return s.replace(/[ \t]+/g," ").replace(/\n{3,}/g,"\n\n").trim();
 }
 function showAiWork(msg){var el=$("#aiWork");if(el){el.hidden=false;el.querySelector(".aimsg").textContent=msg;}}
 function hideAiWork(){var el=$("#aiWork");if(el)el.hidden=true;}
@@ -597,6 +834,31 @@ async function reviewCompleteContract(id){
     toast(fills.length+" Angabe"+(fills.length===1?"":"n")+" ergänzt ✅");
   }catch(e){toast("Ergänzen fehlgeschlagen: "+errMsg(e),true);}
 }
+/* Person im Review zuordnen bzw. neu anlegen und zuordnen */
+async function assignReviewPerson(docId,personId){
+  try{var r=await sb.from("documents").update({person_id:personId}).eq("id",docId);if(r.error)throw r.error;
+    await loadFromDB();reviewDoc=DOCS.find(function(d){return d.id===docId;})||reviewDoc;renderApp();toast("Person zugeordnet ✅");}
+  catch(e){toast("Zuordnen fehlgeschlagen: "+errMsg(e),true);}
+}
+async function reviewCreatePerson(name){
+  if(!reviewDoc)return;
+  try{var p=await createPerson(name);if(p)await assignReviewPerson(reviewDoc.id,p.id);}
+  catch(e){toast("Anlegen fehlgeschlagen: "+errMsg(e),true);}
+}
+/* Person eines Vertrags ändern (per Auswahl-Prompt) */
+function changeContractPersonUI(contractId){
+  var c=contractById(contractId);if(!c)return;
+  if(!PERSONS.length){createPersonUI();return;}
+  var list=PERSONS.map(function(p,i){return (i+1)+" = "+p.name;}).join("\n");
+  var input=prompt("Welcher Person zuordnen?\n\n"+list+"\n\n0 = keine Person\nN = neue Person anlegen",c.person_id?String(PERSONS.findIndex(function(p){return p.id===c.person_id;})+1):"1");
+  if(input===null)return;
+  var t=(input||"").trim();
+  if(t.toUpperCase()==="N"){(async function(){var name=prompt("Name der neuen Person:","");if(name==null)return;name=name.trim();if(!name)return;try{var p=await createPerson(name);if(p)await setContractPerson(contractId,p.id);}catch(e){toast("Fehlgeschlagen: "+errMsg(e),true);}})();return;}
+  var n=parseInt(t,10);
+  if(n===0){setContractPerson(contractId,null);return;}
+  if(!n||n<1||n>PERSONS.length){toast("Ungültige Auswahl.",true);return;}
+  setContractPerson(contractId,PERSONS[n-1].id);
+}
 
 /* ---------- Views ---------- */
 function go(view){activeView=view;if(view!=="contract-detail")detailId=null;renderApp();window.scrollTo({top:0,behavior:"smooth"});}
@@ -624,39 +886,47 @@ function renderApp(){
 
 /* ---- Dashboard ---- */
 function viewDashboard(){
-  var aktive=CONTRACTS.filter(function(c){return c.status==="aktiv";});
+  var CS=filterPerson(CONTRACTS),DS=filterPerson(DOCS);
+  var aktive=CS.filter(function(c){return c.status==="aktiv";});
   var mk=aktive.reduce(function(s,c){return s+monatskosten(c);},0);
-  var rows=CONTRACTS.filter(function(c){return c.status!=="beendet";}).map(function(c){return {c:c,f:fristInfo(c)};});
+  var rows=CS.filter(function(c){return c.status!=="beendet";}).map(function(c){return {c:c,f:fristInfo(c)};});
   rows.sort(function(a,b){
     var oa=a.f.days!=null?a.f.days:(a.f.kind==="flex"?99990:99999);
     var ob=b.f.days!=null?b.f.days:(b.f.kind==="flex"?99990:99999);
     return oa-ob;
   });
   var fr=rows.length?rows.map(function(r){return fristRow(r.c,r.f);}).join(""):'<p class="muted">Noch keine Verträge. Lade ein Dokument hoch oder lege einen Vertrag an – der Butler übernimmt den Rest.</p>';
-  var recent=DOCS.slice(0,3).map(docRow).join("")||'<p class="muted">Noch keine Dokumente im Archiv.</p>';
+  var recent=DS.slice(0,3).map(docRow).join("")||'<p class="muted">Noch keine Dokumente im Archiv.</p>';
   return '<button class="bigadd" data-nav="add">➕ &nbsp;Dokument hochladen oder fotografieren</button>'+
+    personBar()+
     '<div class="kpis">'+
       '<div class="kpi"><div class="klabel">Monatliche Kosten</div><div class="kval">'+fmtEur(mk)+'</div><div class="ksub">'+aktive.length+' aktive Verträge</div></div>'+
       '<div class="kpi"><div class="klabel">Kosten pro Jahr</div><div class="kval">'+fmtEur(mk*12)+'</div><div class="ksub">laufende Verträge</div></div>'+
-      '<div class="kpi"><div class="klabel">Dokumente</div><div class="kval">'+DOCS.length+'</div><div class="ksub">im Archiv</div></div>'+
+      '<div class="kpi"><div class="klabel">Dokumente</div><div class="kval">'+DS.length+'</div><div class="ksub">im Archiv</div></div>'+
     '</div>'+
-    butlerTips()+
+    butlerTips(CS,DS)+
     '<section class="card"><h2 class="sect">⏰ Fristen im Blick</h2>'+fr+'</section>'+
-    costBreakdown()+
+    costByPerson()+
+    costBreakdown(CS)+
     '<section class="card"><h2 class="sect">🕘 Zuletzt hinzugefügt</h2>'+recent+'</section>';
 }
 /* Butler-Tipps: proaktive Hinweise, wo der User etwas tun sollte */
-function butlerTips(){
+function butlerTips(CS,DS){
   var tips=[];
-  CONTRACTS.forEach(function(c){
+  CS.forEach(function(c){
     var f=fristInfo(c);
     if(c.status==="aktiv"&&f.kind==="unbekannt")
       tips.push({txt:'Bei „'+escapeHtml(c.anbieter||"?")+'“ fehlen Vertragsbeginn oder Mindestlaufzeit – ergänze sie, dann überwacht der Butler die Kündigungsfrist.',btn:"Ergänzen",action:"edit-contract",id:c.id});
     if(c.status==="gekuendigt"&&c.gekuendigt_zum&&c.gekuendigt_zum<todayISO())
       tips.push({txt:'„'+escapeHtml(c.anbieter||"?")+'“ war zum '+fmtDate(c.gekuendigt_zum)+' gekündigt und ist inzwischen abgelaufen.',btn:"Als beendet markieren",action:"tip-ended",id:c.id});
   });
-  var unlinked=DOCS.filter(function(d){return !d.contract_id&&["vertrag","rechnung","police","preisaenderung","kuendigung"].indexOf(d.doc_type)>=0;}).length;
+  var unlinked=DS.filter(function(d){return !d.contract_id&&["vertrag","rechnung","police","preisaenderung","kuendigung"].indexOf(d.doc_type)>=0;}).length;
   if(unlinked)tips.push({txt:unlinked+(unlinked===1?" Dokument ist":" Dokumente sind")+" noch keinem Vertrag zugeordnet – zugeordnet findet der Butler sie schneller wieder.",btn:"Ansehen",nav:"docs"});
+  /* Dokumente ohne Person (nur wenn es überhaupt Personen gibt) */
+  if(PERSONS.length){
+    var noperson=DS.filter(function(d){return !d.person_id&&["vertrag","rechnung","police"].indexOf(d.doc_type)>=0;}).length;
+    if(noperson&&!activePerson)tips.push({txt:noperson+(noperson===1?" Dokument ist":" Dokumente sind")+" noch keiner Person zugeordnet – ordne sie zu, um klar zu trennen, wem was gehört.",btn:"Ansehen",nav:"docs"});
+  }
   if(!tips.length)return "";
   return '<section class="card"><h2 class="sect">🎩 Butler-Tipps</h2>'+tips.map(function(t){
     var b=t.nav?'<button class="ghost" data-nav="'+t.nav+'">'+t.btn+'</button>':'<button class="ghost" data-action="'+t.action+'" data-id="'+t.id+'">'+t.btn+'</button>';
@@ -664,15 +934,29 @@ function butlerTips(){
   }).join("")+'</section>';
 }
 /* Monatskosten nach Kategorie (nur wenn mindestens 2 Kategorien Kosten haben) */
-function costBreakdown(){
+function costBreakdown(CS){
   var sums={};
-  CONTRACTS.forEach(function(c){var m=monatskosten(c);if(m>0)sums[c.kategorie]=(sums[c.kategorie]||0)+m;});
+  CS.forEach(function(c){var m=monatskosten(c);if(m>0)sums[c.kategorie]=(sums[c.kategorie]||0)+m;});
   var keys=Object.keys(sums);if(keys.length<2)return "";
   keys.sort(function(a,b){return sums[b]-sums[a];});
   var max=sums[keys[0]];
   return '<section class="card"><h2 class="sect">💶 Monatskosten nach Kategorie</h2>'+keys.map(function(k){
     var ki=katInfo(k);
     return '<div class="kcat"><span class="kcl">'+ki.icon+' '+ki.label+'</span><span class="kbarw"><span class="kbar" style="width:'+Math.max(4,Math.round(sums[k]/max*100))+'%"></span></span><span class="kcv">'+fmtEur(sums[k])+'</span></div>';
+  }).join("")+'</section>';
+}
+/* Monatskosten nach Person – nur wenn Personen existieren und kein Personen-Filter aktiv */
+function costByPerson(){
+  if(!PERSONS.length||activePerson)return "";
+  var sums={},ohne=0;
+  CONTRACTS.forEach(function(c){var m=monatskosten(c);if(m<=0)return;if(c.person_id)sums[c.person_id]=(sums[c.person_id]||0)+m;else ohne+=m;});
+  var entries=PERSONS.filter(function(p){return sums[p.id];}).map(function(p){return {name:p.name,color:personColor(p),val:sums[p.id]};});
+  if(ohne>0)entries.push({name:"ohne Person",color:"#a1a1aa",val:ohne});
+  if(entries.length<2)return "";
+  entries.sort(function(a,b){return b.val-a.val;});
+  var max=entries[0].val;
+  return '<section class="card"><h2 class="sect">👥 Monatskosten nach Person</h2>'+entries.map(function(e){
+    return '<div class="kcat"><span class="kcl"><span class="pdot" style="background:'+e.color+';display:inline-block;margin-right:6px"></span>'+escapeHtml(e.name)+'</span><span class="kbarw"><span class="kbar" style="width:'+Math.max(4,Math.round(e.val/max*100))+'%"></span></span><span class="kcv">'+fmtEur(e.val)+'</span></div>';
   }).join("")+'</section>';
 }
 function fristRow(c,f){
@@ -689,7 +973,7 @@ function fristRow(c,f){
 function viewContracts(){
   if(!CONTRACTS.length)return '<section class="card"><h2 class="sect">📑 Verträge</h2><p class="muted">Noch keine Verträge angelegt. Am schnellsten geht es, wenn du ein Vertrags-PDF oder einen Brief hochlädst – der Butler füllt alles aus.</p><div class="btnrow"><button class="primary" data-nav="add">➕ Dokument hochladen</button><button class="ghost" data-action="new-contract">Von Hand anlegen</button></div></section>';
   /* intelligente Sortierung: dringendste Fristen zuerst, gekündigte/beendete ans Ende */
-  var sorted=CONTRACTS.slice().sort(function(a,b){
+  var sorted=filterPerson(CONTRACTS).slice().sort(function(a,b){
     var rank={aktiv:0,gekuendigt:1,beendet:2};
     var ra=rank[a.status]!=null?rank[a.status]:0,rb=rank[b.status]!=null?rank[b.status]:0;
     if(ra!==rb)return ra-rb;
@@ -704,10 +988,12 @@ function viewContracts(){
     var badge='<span class="badge '+f.level+'">'+(f.kind==="flex"?"jederzeit kündbar":(f.kind==="fest"?"Frist: "+fmtDate(f.lastDay):escapeHtml(f.label)))+'</span>';
     return '<div class="ccard" data-action="open-contract" data-id="'+c.id+'">'+
       '<div class="chead"><span class="cicon">'+k.icon+'</span><div><div class="cname">'+escapeHtml(c.anbieter||"?")+'</div><div class="csub">'+escapeHtml(c.produkt||k.label)+(nd?' · '+nd+' Dok.':"")+'</div></div></div>'+
+      (c.person_id?'<div style="margin-top:8px">'+personBadge(c.person_id)+'</div>':"")+
       '<div class="cmeta"><span class="ccost">'+(c.kosten!=null?fmtEur(c.kosten)+' <span class="muted">/ '+(INTERVALL_LABEL[c.kosten_intervall]||"?")+'</span>':"")+'</span>'+badge+'</div>'+
     '</div>';
   }).join("");
-  return '<div class="btnrow" style="margin:0 0 16px"><button class="primary" data-nav="add">➕ Per Dokument</button><button class="ghost" data-action="new-contract">Von Hand anlegen</button></div><div class="clist">'+cards+'</div>';
+  var body=cards?('<div class="clist">'+cards+'</div>'):'<section class="card"><p class="muted">Keine Verträge für diese Person.</p></section>';
+  return personBar()+'<div class="btnrow" style="margin:0 0 16px"><button class="primary" data-nav="add">➕ Per Dokument</button><button class="ghost" data-action="new-contract">Von Hand anlegen</button></div>'+body;
 }
 function viewContractDetail(){
   var c=contractById(detailId);
@@ -716,8 +1002,10 @@ function viewContractDetail(){
   var law=(c.vertragsstart&&c.vertragsstart>=NEUES_RECHT_AB&&(c.verlaengerung_monate==null||c.verlaengerung_monate>1))
     ?'<span class="badge law">⚖️ Neues Recht: nach der Mindestlaufzeit monatlich kündbar (max. 1 Monat Frist)</span>':"";
   var mk=monatskosten(c);
+  var personVal=c.person_id?(personBadge(c.person_id)+' <button class="linkbtn" data-action="change-person" data-id="'+c.id+'" style="display:inline;margin-left:8px;font-size:.82rem">ändern</button>'):(PERSONS.length?'<button class="linkbtn" data-action="change-person" data-id="'+c.id+'" style="display:inline;font-size:.85rem">➕ Person zuordnen</button>':'<span class="muted">–</span>');
   var dgrid='<div class="dgrid">'+
     dRow("Kategorie",k.icon+" "+k.label)+
+    dRow("Person",personVal)+
     dRow("Anbieter",escapeHtml(c.anbieter||"–"))+
     dRow("Tarif / Produkt",escapeHtml(c.produkt||"–"))+
     dRow("Kundennummer",escapeHtml(c.kundennummer||"–"))+
@@ -746,9 +1034,47 @@ function viewContractDetail(){
       statusBtn+
       '<button class="danger" data-action="del-contract" data-id="'+c.id+'">🗑️ Löschen</button>'+
     '</div></section>'+
+    invoiceHistory(c)+
     '<section class="card"><h2 class="sect">📁 Dokumente zu diesem Vertrag</h2>'+docsHtml+'</section>';
 }
 function dRow(k,v){return '<span class="dk">'+k+'</span><span class="dv">'+v+'</span>';}
+/* Monatsrechnungen: aus zugeordneten Rechnungs-Dokumenten Verlauf + Trend bauen */
+function invoiceDate(d){
+  var e=d.extracted||{};
+  return e.zeitraumBis||e.zeitraumVon||d.doc_date||e.datum||String(d.created_at).slice(0,10);
+}
+function invoiceHistory(c){
+  var invs=DOCS.filter(function(d){return d.contract_id===c.id&&d.doc_type==="rechnung";})
+    .map(function(d){var e=d.extracted||{};return {doc:d,betrag:(e.betrag!=null?Number(e.betrag):null),von:e.zeitraumVon||null,bis:e.zeitraumBis||null,date:invoiceDate(d)};})
+    .sort(function(a,b){return String(a.date).localeCompare(String(b.date));});
+  if(!invs.length)return "";
+  var withBetrag=invs.filter(function(i){return i.betrag!=null;});
+  var mini="";
+  if(withBetrag.length>=2){
+    var max=Math.max.apply(null,withBetrag.map(function(i){return i.betrag;}))||1;
+    mini='<div class="invmini">'+withBetrag.map(function(i){return '<span class="imb" style="height:'+Math.max(6,Math.round(i.betrag/max*100))+'%" title="'+fmtEur(i.betrag)+'"></span>';}).join("")+'</div>';
+  }
+  var sum=withBetrag.reduce(function(s,i){return s+i.betrag;},0);
+  var avg=withBetrag.length?sum/withBetrag.length:null;
+  var rows=invs.slice().reverse().map(function(i,idx,arr){
+    var e=i.doc.extracted||{};
+    var per=(i.von&&i.bis)?(fmtDate(i.von)+" – "+fmtDate(i.bis)):(i.bis?("bis "+fmtDate(i.bis)):fmtDate(i.date));
+    /* Delta gegenüber der zeitlich vorherigen Rechnung */
+    var prev=null;var pos=invs.indexOf(i);if(pos>0)prev=invs[pos-1];
+    var delta="";
+    if(i.betrag!=null&&prev&&prev.betrag!=null){
+      var d=i.betrag-prev.betrag;
+      var cls=d>0.005?"up":(d<-0.005?"down":"same");
+      var arrow=d>0.005?"▲":(d<-0.005?"▼":"■");
+      delta='<span class="invdelta '+cls+'">'+arrow+" "+fmtEur(Math.abs(d))+'</span>';
+    }
+    return '<div class="invrow"><div class="invp"><div class="invper">'+escapeHtml(per)+'</div><div class="invd">'+escapeHtml(i.doc.filename||"Rechnung")+'</div></div>'+
+      '<div class="invb">'+(i.betrag!=null?fmtEur(i.betrag):"–")+delta+'</div>'+
+      '<button class="ghost" data-action="doc-view" data-id="'+i.doc.id+'" style="flex:none;font-size:.8rem;padding:6px 10px">👁️</button></div>';
+  }).join("");
+  var head=withBetrag.length?('<p class="muted" style="font-size:.85rem;margin:0 0 6px">'+withBetrag.length+' Rechnungen'+(avg!=null?' · ⌀ '+fmtEur(avg):"")+' · gesamt '+fmtEur(sum)+'</p>'):"";
+  return '<section class="card"><h2 class="sect">🧾 Monatsrechnungen</h2>'+head+mini+rows+'</section>';
+}
 
 /* ---- Vertragsformular ---- */
 function viewContractForm(){
@@ -759,11 +1085,15 @@ function viewContractForm(){
   var opts=Object.keys(KAT).map(function(kk){return '<option value="'+kk+'"'+(kk===kat?" selected":"")+'>'+KAT[kk].icon+' '+KAT[kk].label+'</option>';}).join("");
   var iv=v("kosten_intervall","kostenIntervall")||"monatlich";
   var ivOpts=Object.keys(INTERVALL_LABEL).map(function(kk){return '<option value="'+kk+'"'+(kk===iv?" selected":"")+'>'+INTERVALL_LABEL[kk]+'</option>';}).join("");
+  var curPerson=c?(c.person_id||""):(formPerson||"");
+  var personOpts='<option value="">— keine —</option>'+PERSONS.map(function(pp){return '<option value="'+pp.id+'"'+(pp.id===curPerson?" selected":"")+'>'+escapeHtml(pp.name)+'</option>';}).join("");
+  var personField=PERSONS.length?('<div><label class="f">Person</label><select id="cf_person">'+personOpts+'</select></div>'):('<div><label class="f">Person</label><button class="ghost" data-action="person-add-inline" style="width:100%">➕ Erste Person anlegen</button></div>');
   return '<button class="linkbtn" data-nav="contracts" style="margin-bottom:12px">← Abbrechen</button>'+
   '<section class="card"><h2 class="sect">'+(c?"✏️ Vertrag bearbeiten":"➕ Neuer Vertrag")+'</h2>'+
   (formPrefill?'<div class="ainote">🎩 Der Butler hat das Formular aus dem Dokument vorbefüllt. <b>Bitte prüfe alle Angaben</b>, bevor du speicherst.</div>':"")+
   '<div class="formrow">'+
    '<div><label class="f">Kategorie</label><select id="cf_kategorie">'+opts+'</select></div>'+
+   personField+
    '<div><label class="f">Anbieter *</label><input type="text" id="cf_anbieter" list="anbieterList" value="'+escapeHtml(v("anbieter"))+'" placeholder="z. B. TeleMax GmbH"><datalist id="anbieterList">'+anbieterOptions()+'</datalist></div>'+
    '<div><label class="f">Tarif / Produkt</label><input type="text" id="cf_produkt" value="'+escapeHtml(v("produkt"))+'"></div>'+
    '<div><label class="f">Kundennummer</label><input type="text" id="cf_kundennummer" value="'+escapeHtml(v("kundennummer"))+'"></div>'+
@@ -827,6 +1157,7 @@ async function onSaveContract(){
     kosten_intervall:$("#cf_iv").value||"monatlich",
     notizen:($("#cf_notizen").value||"").trim()||null
   };
+  var pf=$("#cf_person");cols.person_id=(pf&&pf.value)?pf.value:null;
   /* Plausibilitätsprüfung: der Butler warnt, blockiert aber nicht */
   var warns=[];
   if(cols.kuendigungsfrist_monate!=null&&cols.mindestlaufzeit_monate!=null&&cols.mindestlaufzeit_monate>0&&cols.kuendigungsfrist_monate>cols.mindestlaufzeit_monate)
@@ -844,8 +1175,8 @@ async function onSaveContract(){
   if(warns.length&&!confirm("🎩 Der Butler ist stutzig:\n\n• "+warns.join("\n• ")+"\n\nTrotzdem speichern?"))return;
   try{
     var id=await saveContractData(cols,editId);
-    if(pendingDoc&&!editId){try{await sb.from("documents").update({contract_id:id}).eq("id",pendingDoc);}catch(e){}}
-    pendingDoc=null;formPrefill=null;var wasEdit=!!editId;editId=null;
+    if(pendingDoc&&!editId){try{var du={contract_id:id};if(cols.person_id)du.person_id=cols.person_id;await sb.from("documents").update(du).eq("id",pendingDoc);}catch(e){}}
+    pendingDoc=null;formPrefill=null;formPerson="";var wasEdit=!!editId;editId=null;
     await loadFromDB();
     detailId=id;activeView="contract-detail";renderApp();
     toast(wasEdit?"Vertrag aktualisiert ✅":"Vertrag angelegt ✅");
@@ -876,7 +1207,7 @@ function docRow(d){
   return '<div class="docrow"><span class="dicon">'+t.icon+'</span>'+
     '<div class="dbody"><div class="dname">'+escapeHtml(d.filename||"Dokument")+'</div>'+
     (d.zusammenfassung?'<div class="dsum">'+escapeHtml(d.zusammenfassung)+'</div>':"")+
-    '<div class="dmeta"><span>'+t.label+'</span>'+(kat?'<span>'+kat.icon+' '+kat.label+'</span>':"")+'<span>'+fmtDate(d.doc_date||String(d.created_at).slice(0,10))+'</span>'+
+    '<div class="dmeta">'+(d.person_id?personBadge(d.person_id):"")+'<span>'+t.label+'</span>'+(kat?'<span>'+kat.icon+' '+kat.label+'</span>':"")+'<span>'+fmtDate(d.doc_date||String(d.created_at).slice(0,10))+'</span>'+
     (c?'<span>🔗 '+escapeHtml(c.anbieter||"Vertrag")+'</span>':'<span class="muted">ohne Vertrag</span>')+'</div></div>'+
     '<div class="dact"><button class="ghost" data-action="doc-view" data-id="'+d.id+'">👁️ Ansehen</button>'+
     '<button class="ghost" data-action="doc-link" data-id="'+d.id+'">🔗 Zuordnen</button>'+
@@ -886,14 +1217,15 @@ function viewDocs(){
   var kats={};DOCS.forEach(function(d){if(d.extracted&&d.extracted.kategorie)kats[d.extracted.kategorie]=1;});
   var katOpts='<option value="">Alle Kategorien</option>'+Object.keys(kats).map(function(k){return '<option value="'+k+'"'+(docFilter.kat===k?" selected":"")+'>'+katInfo(k).icon+' '+katInfo(k).label+'</option>';}).join("");
   var typOpts='<option value="">Alle Typen</option>'+Object.keys(DOCTYPE).map(function(k){return '<option value="'+k+'"'+(docFilter.typ===k?" selected":"")+'>'+DOCTYPE[k].label+'</option>';}).join("");
-  var list=DOCS.filter(function(d){
+  var list=filterPerson(DOCS).filter(function(d){
     if(docFilter.typ&&d.doc_type!==docFilter.typ)return false;
     if(docFilter.kat&&!(d.extracted&&d.extracted.kategorie===docFilter.kat))return false;
     if(docFilter.q){var q=docFilter.q.toLowerCase();var hay=((d.filename||"")+" "+(d.zusammenfassung||"")+" "+JSON.stringify(d.extracted||{})).toLowerCase();if(hay.indexOf(q)<0)return false;}
     return true;
   });
   var rows=list.length?list.map(docRow).join(""):'<p class="muted">Keine Dokumente'+(DOCS.length?" für diesen Filter":"")+'.</p>';
-  return '<div class="filterbar"><select id="df_kat">'+katOpts+'</select><select id="df_typ">'+typOpts+'</select><input type="text" id="df_q" placeholder="Suchen …" value="'+escapeHtml(docFilter.q)+'"></div>'+
+  return personBar()+
+    '<div class="filterbar"><select id="df_kat">'+katOpts+'</select><select id="df_typ">'+typOpts+'</select><input type="text" id="df_q" placeholder="Suchen …" value="'+escapeHtml(docFilter.q)+'"></div>'+
     '<section class="card">'+rows+'</section>'+
     '<button class="bigadd" data-nav="add">➕ &nbsp;Weiteres Dokument hinzufügen</button>';
 }
@@ -917,6 +1249,19 @@ function viewAdd(){
         return false;
       });
       if(dup)smart.push('⚠️ Ein sehr ähnliches Dokument liegt schon im Archiv („'+escapeHtml(dup.filename||"?")+'“ vom '+fmtDate(dup.doc_date||String(dup.created_at).slice(0,10))+') – möglicherweise doppelt hochgeladen.');
+      /* Personen-Erkennung */
+      if(reviewDoc.person_id){
+        smart.push('👤 Zugeordnet zu '+personBadge(reviewDoc.person_id)+'.');
+      }else if(ext.vertragspartner){
+        var pmatch=matchPerson(ext.vertragspartner);
+        if(pmatch){
+          smart.push('👤 Vertragspartner „'+escapeHtml(ext.vertragspartner)+'“ → passt zu '+personBadge(pmatch.id)+'.');
+          extraBtns+='<button class="ghost" data-action="review-setperson" data-id="'+pmatch.id+'">👤 '+escapeHtml(pmatch.name)+' zuordnen</button>';
+        }else{
+          smart.push('👤 Der Butler erkennt als Vertragspartner: <b>'+escapeHtml(ext.vertragspartner)+'</b>. Als eigene Person führen?');
+          extraBtns+='<button class="ghost" data-action="review-createperson" data-name="'+escapeHtml(ext.vertragspartner)+'">👤 Person „'+escapeHtml(ext.vertragspartner)+'“ anlegen</button>';
+        }
+      }
       if(match){
         /* Kündigung erkannt → Status-Aktion anbieten */
         if(ext.docType==="kuendigung"&&match.status==="aktiv"){
@@ -957,15 +1302,17 @@ function viewAdd(){
         actions+'</section>';
     }
   }
+  var personHint=(activePerson&&personById(activePerson))?'<div class="ainote">👤 Neue Dokumente werden automatisch <b>'+escapeHtml(personById(activePerson).name)+'</b> zugeordnet (aktiver Personen-Filter).</div>':"";
   return review+
   '<section class="card"><h2 class="sect">➕ Dokument hinzufügen</h2>'+
-  '<p class="muted" style="margin-bottom:14px">PDF hochladen oder Brief abfotografieren – der Butler liest Laufzeit, Fristen, Preise und Kundennummern automatisch aus.</p>'+
+  '<p class="muted" style="margin-bottom:14px">PDF/Foto hochladen, Brief fotografieren oder eine E-Mail (.eml) ablegen – der Butler liest Laufzeit, Fristen, Preise, Kundennummern und den Vertragspartner automatisch aus. PDF-Anhänge aus E-Mails werden erkannt.</p>'+
+  personHint+
   '<div class="upzone">'+
    '<button class="upbtn" data-action="pick-cam"><span class="uic">📷</span>Brief fotografieren<span class="usub">Kamera öffnet sich direkt</span></button>'+
-   '<button class="upbtn" data-action="pick-file"><span class="uic">📄</span>Datei auswählen<span class="usub">PDF, JPG oder PNG · auf Android auch aus Google Drive</span></button>'+
+   '<button class="upbtn" data-action="pick-file"><span class="uic">📄</span>Datei auswählen<span class="usub">PDF, Foto oder E-Mail (.eml) · auf Android auch aus Google Drive</span></button>'+
   '</div>'+
   '<input type="file" id="fileCam" accept="image/*" capture="environment" hidden>'+
-  '<input type="file" id="filePick" accept="application/pdf,image/*" hidden>'+
+  '<input type="file" id="filePick" accept="application/pdf,image/*,message/rfc822,.eml" hidden>'+
   '<div id="aiWork" class="aiwork" hidden><span class="spin"></span><span class="aimsg">…</span></div>'+
   '<p class="muted" style="font-size:.8rem;margin-top:14px">🔒 Deine Dokumente liegen verschlüsselt in deinem privaten Speicher und sind nur für deinen Haushalt sichtbar. Die KI-Analyse kostet weniger als 1 Cent pro Dokument.</p>'+
   '</section>';
@@ -988,11 +1335,19 @@ function viewSettings(){
     '<p class="muted" id="hhMeta" style="font-size:.85rem;margin-top:8px"></p>'+
     '<p class="muted" style="font-size:.8rem">Haushalte werden mit dem Verbrauchs-Tracker geteilt – gleiche Anmeldung, gleiche Mitglieder.</p>'+
     '<button class="linkbtn" data-action="hh-rename" style="margin-top:12px">✏️ Aktuellen Haushalt umbenennen</button>'+
-    '<div class="acclabel accsep">👥 Person einladen</div>'+
+    '<div class="acclabel accsep">👥 Mitbenutzer einladen (teilt sich das Konto)</div>'+
     '<button class="ghost" data-action="hh-invite">Einladungs-Code erstellen</button>'+
     '<div id="inviteOut" class="inviteout" hidden></div>'+
     '<div class="acclabel accsep">Einer Einladung beitreten</div>'+
     '<div class="hhadd"><input id="hhJoinCode" type="text" maxlength="12" placeholder="Code eingeben"><button class="ghost" data-action="hh-join">Beitreten</button></div>'+
+  '</section>'+
+  '<section class="card"><h2 class="sect">🧑‍🤝‍🧑 Personen / Mandanten</h2>'+
+    '<p class="muted" style="font-size:.88rem;margin-bottom:12px">Trenne Dokumente nach Person – z. B. du selbst, deine Eltern, deine Oma. Der Butler erkennt den Vertragspartner beim Einlesen und ordnet automatisch zu.</p>'+
+    (PERSONS.length?('<div class="personmgr">'+PERSONS.map(function(p){
+      var nc=CONTRACTS.filter(function(c){return c.person_id===p.id;}).length,nd=DOCS.filter(function(d){return d.person_id===p.id;}).length;
+      return '<div class="prow"><span class="pname"><span class="pdot" style="background:'+personColor(p)+'"></span>'+escapeHtml(p.name)+'</span><span class="muted" style="font-size:.8rem">'+nc+' Verträge · '+nd+' Dok.</span><button class="ghost" data-action="person-rename" data-id="'+p.id+'">✏️</button><button class="danger" data-action="person-del" data-id="'+p.id+'">🗑️</button></div>';
+    }).join("")+'</div>'):'<p class="muted">Noch keine Personen angelegt.</p>')+
+    '<button class="ghost" data-action="person-add" style="margin-top:12px">➕ Person hinzufügen</button>'+
   '</section>'+
   '<section class="card"><h2 class="sect">💾 Daten</h2>'+
     '<p class="muted" style="font-size:.9rem">Speicher belegt: <b>'+mb+'</b> ('+DOCS.length+(DOCS.length===1?" Dokument":" Dokumente")+')</p>'+
@@ -1166,7 +1521,7 @@ function onAppClick(e){
   var b=e.target.closest("[data-action]");if(!b)return;
   var act=b.dataset.action,id=b.dataset.id;
   if(act==="open-contract"){detailId=id;activeView="contract-detail";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
-  else if(act==="new-contract"){editId=null;formPrefill=null;pendingDoc=null;activeView="contract-form";renderApp();}
+  else if(act==="new-contract"){editId=null;formPrefill=null;pendingDoc=null;formPerson=activePerson||"";activeView="contract-form";renderApp();}
   else if(act==="edit-contract"){editId=id;formPrefill=null;activeView="contract-form";renderApp();}
   else if(act==="save-contract")onSaveContract();
   else if(act==="del-contract")deleteContract(id);
@@ -1180,7 +1535,7 @@ function onAppClick(e){
   else if(act==="pick-file"){var fp=$("#filePick");if(fp)fp.click();}
   else if(act==="review-link"){if(reviewDoc)linkDoc(reviewDoc.id,id).then(function(){reviewDoc=null;detailId=id;activeView="contract-detail";renderApp();});}
   else if(act==="review-new"){
-    if(reviewDoc){formPrefill=reviewDoc.extracted||null;pendingDoc=reviewDoc.id;reviewDoc=null;}
+    if(reviewDoc){formPrefill=reviewDoc.extracted||null;pendingDoc=reviewDoc.id;formPerson=reviewDoc.person_id||"";reviewDoc=null;}
     editId=null;activeView="contract-form";renderApp();
   }
   else if(act==="review-done"){reviewDoc=null;go("docs");toast("Im Archiv abgelegt ✅");}
@@ -1188,6 +1543,14 @@ function onAppClick(e){
   else if(act==="review-price")reviewUpdatePrice(id,parseFloat(b.dataset.price),b.dataset.iv||null);
   else if(act==="review-complete")reviewCompleteContract(id);
   else if(act==="tip-ended"){(async function(){try{await saveContractData({status:"beendet"},id);await loadFromDB();renderApp();toast("Vertrag als beendet markiert ✅");}catch(e){toast("Fehlgeschlagen: "+errMsg(e),true);}})();}
+  else if(act==="pfilter"){activePerson=id||"";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
+  else if(act==="person-add")createPersonUI();
+  else if(act==="person-add-inline")createPersonUI();
+  else if(act==="person-rename")renamePersonUI(id);
+  else if(act==="person-del")deletePersonUI(id);
+  else if(act==="change-person")changeContractPersonUI(id);
+  else if(act==="review-setperson"){if(reviewDoc)assignReviewPerson(reviewDoc.id,id);}
+  else if(act==="review-createperson"){reviewCreatePerson(b.dataset.name);}
   else if(act==="hh-switch")switchHousehold(id);
   else if(act==="hh-rename")renameHouseholdUI();
   else if(act==="hh-invite")inviteUI();
