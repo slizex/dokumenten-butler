@@ -159,6 +159,17 @@ textarea{min-height:74px;resize:vertical}
 .wichtig{margin:8px 0 0;padding-left:20px;font-size:.9rem}
 .wichtig li{margin:3px 0}
 
+/* ---- Butler-Tipps / Kosten-Aufschlüsselung ---- */
+.tiprow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 4px;border-bottom:1px solid var(--border);font-size:.9rem}
+.tiprow:last-child{border-bottom:none}
+.tiprow button{flex:none;font-size:.8rem;padding:6px 10px}
+.kcat{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:.88rem}
+.kcat .kcl{width:170px;flex:none;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+@media(max-width:560px){.kcat .kcl{width:120px}}
+.kbarw{flex:1;height:8px;background:var(--panel2);border-radius:99px;overflow:hidden}
+.kbar{display:block;height:100%;background:var(--accent);border-radius:99px}
+.kcv{flex:none;min-width:82px;text-align:right;font-weight:600}
+
 /* ---- Einstellungen / Haushalt ---- */
 .acclabel{font-size:.82rem;font-weight:650;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin:4px 0 8px}
 .accsep{margin-top:26px;padding-top:18px;border-top:1px solid var(--border)}
@@ -535,6 +546,57 @@ function findMatch(ext){
   });
   return best;
 }
+/* Welche Angaben aus dem Dokument fehlen dem Vertrag noch? */
+var FILL_MAP=[
+  {col:"vertragsstart",ext:"vertragsstart",label:"Vertragsbeginn"},
+  {col:"mindestlaufzeit_monate",ext:"mindestlaufzeitMonate",label:"Mindestlaufzeit"},
+  {col:"kuendigungsfrist_monate",ext:"kuendigungsfristMonate",label:"Kündigungsfrist"},
+  {col:"verlaengerung_monate",ext:"verlaengerungMonate",label:"Verlängerung"},
+  {col:"kundennummer",ext:"kundennummer",label:"Kundennummer"},
+  {col:"vertragsnummer",ext:"vertragsnummer",label:"Vertragsnummer"},
+  {col:"produkt",ext:"produkt",label:"Tarif/Produkt"},
+  {col:"kosten",ext:"kosten",label:"Kosten"}
+];
+function missingFills(c,ext){
+  return FILL_MAP.filter(function(f){return (c[f.col]==null||c[f.col]==="")&&ext[f.ext]!=null&&ext[f.ext]!=="";})
+    .map(function(f){return {col:f.col,val:ext[f.ext],label:f.label};});
+}
+async function linkDocSilent(docId,contractId){
+  try{await sb.from("documents").update({contract_id:contractId}).eq("id",docId);}catch(e){}
+}
+/* Review-Aktionen: Kündigung übernehmen / Preis aktualisieren / Daten ergänzen */
+async function reviewCancelContract(id){
+  var d=reviewDoc;reviewDoc=null;
+  if(d)await linkDocSilent(d.id,id);
+  await setContractStatus(id,"gekuendigt");
+  detailId=id;activeView="contract-detail";renderApp();
+}
+async function reviewUpdatePrice(id,price,iv){
+  var d=reviewDoc;reviewDoc=null;
+  if(d)await linkDocSilent(d.id,id);
+  var cols={kosten:price};
+  if(iv&&INTERVALL_LABEL[iv])cols.kosten_intervall=iv;
+  try{
+    await saveContractData(cols,id);
+    await loadFromDB();
+    detailId=id;activeView="contract-detail";renderApp();
+    toast("Preis aktualisiert: "+fmtEur(price)+" ✅");
+  }catch(e){toast("Preis-Update fehlgeschlagen: "+errMsg(e),true);}
+}
+async function reviewCompleteContract(id){
+  var d=reviewDoc,c=contractById(id);
+  if(!d||!d.extracted||!c){reviewDoc=null;return;}
+  var fills=missingFills(c,d.extracted);
+  reviewDoc=null;
+  await linkDocSilent(d.id,id);
+  var cols={};fills.forEach(function(f){cols[f.col]=f.val;});
+  try{
+    if(fills.length)await saveContractData(cols,id);
+    await loadFromDB();
+    detailId=id;activeView="contract-detail";renderApp();
+    toast(fills.length+" Angabe"+(fills.length===1?"":"n")+" ergänzt ✅");
+  }catch(e){toast("Ergänzen fehlgeschlagen: "+errMsg(e),true);}
+}
 
 /* ---------- Views ---------- */
 function go(view){activeView=view;if(view!=="contract-detail")detailId=null;renderApp();window.scrollTo({top:0,behavior:"smooth"});}
@@ -554,7 +616,7 @@ function renderApp(){
   if(activeView==="dashboard")app.innerHTML=viewDashboard();
   else if(activeView==="contracts")app.innerHTML=viewContracts();
   else if(activeView==="contract-detail")app.innerHTML=viewContractDetail();
-  else if(activeView==="contract-form")app.innerHTML=viewContractForm();
+  else if(activeView==="contract-form"){app.innerHTML=viewContractForm();updateFormPreview();}
   else if(activeView==="docs")app.innerHTML=viewDocs();
   else if(activeView==="add")app.innerHTML=viewAdd();
   else if(activeView==="settings"){app.innerHTML=viewSettings();refreshHhMeta();}
@@ -578,8 +640,40 @@ function viewDashboard(){
       '<div class="kpi"><div class="klabel">Kosten pro Jahr</div><div class="kval">'+fmtEur(mk*12)+'</div><div class="ksub">laufende Verträge</div></div>'+
       '<div class="kpi"><div class="klabel">Dokumente</div><div class="kval">'+DOCS.length+'</div><div class="ksub">im Archiv</div></div>'+
     '</div>'+
+    butlerTips()+
     '<section class="card"><h2 class="sect">⏰ Fristen im Blick</h2>'+fr+'</section>'+
+    costBreakdown()+
     '<section class="card"><h2 class="sect">🕘 Zuletzt hinzugefügt</h2>'+recent+'</section>';
+}
+/* Butler-Tipps: proaktive Hinweise, wo der User etwas tun sollte */
+function butlerTips(){
+  var tips=[];
+  CONTRACTS.forEach(function(c){
+    var f=fristInfo(c);
+    if(c.status==="aktiv"&&f.kind==="unbekannt")
+      tips.push({txt:'Bei „'+escapeHtml(c.anbieter||"?")+'“ fehlen Vertragsbeginn oder Mindestlaufzeit – ergänze sie, dann überwacht der Butler die Kündigungsfrist.',btn:"Ergänzen",action:"edit-contract",id:c.id});
+    if(c.status==="gekuendigt"&&c.gekuendigt_zum&&c.gekuendigt_zum<todayISO())
+      tips.push({txt:'„'+escapeHtml(c.anbieter||"?")+'“ war zum '+fmtDate(c.gekuendigt_zum)+' gekündigt und ist inzwischen abgelaufen.',btn:"Als beendet markieren",action:"tip-ended",id:c.id});
+  });
+  var unlinked=DOCS.filter(function(d){return !d.contract_id&&["vertrag","rechnung","police","preisaenderung","kuendigung"].indexOf(d.doc_type)>=0;}).length;
+  if(unlinked)tips.push({txt:unlinked+(unlinked===1?" Dokument ist":" Dokumente sind")+" noch keinem Vertrag zugeordnet – zugeordnet findet der Butler sie schneller wieder.",btn:"Ansehen",nav:"docs"});
+  if(!tips.length)return "";
+  return '<section class="card"><h2 class="sect">🎩 Butler-Tipps</h2>'+tips.map(function(t){
+    var b=t.nav?'<button class="ghost" data-nav="'+t.nav+'">'+t.btn+'</button>':'<button class="ghost" data-action="'+t.action+'" data-id="'+t.id+'">'+t.btn+'</button>';
+    return '<div class="tiprow"><span>'+t.txt+'</span>'+b+'</div>';
+  }).join("")+'</section>';
+}
+/* Monatskosten nach Kategorie (nur wenn mindestens 2 Kategorien Kosten haben) */
+function costBreakdown(){
+  var sums={};
+  CONTRACTS.forEach(function(c){var m=monatskosten(c);if(m>0)sums[c.kategorie]=(sums[c.kategorie]||0)+m;});
+  var keys=Object.keys(sums);if(keys.length<2)return "";
+  keys.sort(function(a,b){return sums[b]-sums[a];});
+  var max=sums[keys[0]];
+  return '<section class="card"><h2 class="sect">💶 Monatskosten nach Kategorie</h2>'+keys.map(function(k){
+    var ki=katInfo(k);
+    return '<div class="kcat"><span class="kcl">'+ki.icon+' '+ki.label+'</span><span class="kbarw"><span class="kbar" style="width:'+Math.max(4,Math.round(sums[k]/max*100))+'%"></span></span><span class="kcv">'+fmtEur(sums[k])+'</span></div>';
+  }).join("")+'</section>';
 }
 function fristRow(c,f){
   var k=katInfo(c.kategorie);
@@ -594,7 +688,17 @@ function fristRow(c,f){
 /* ---- Verträge ---- */
 function viewContracts(){
   if(!CONTRACTS.length)return '<section class="card"><h2 class="sect">📑 Verträge</h2><p class="muted">Noch keine Verträge angelegt. Am schnellsten geht es, wenn du ein Vertrags-PDF oder einen Brief hochlädst – der Butler füllt alles aus.</p><div class="btnrow"><button class="primary" data-nav="add">➕ Dokument hochladen</button><button class="ghost" data-action="new-contract">Von Hand anlegen</button></div></section>';
-  var cards=CONTRACTS.map(function(c){
+  /* intelligente Sortierung: dringendste Fristen zuerst, gekündigte/beendete ans Ende */
+  var sorted=CONTRACTS.slice().sort(function(a,b){
+    var rank={aktiv:0,gekuendigt:1,beendet:2};
+    var ra=rank[a.status]!=null?rank[a.status]:0,rb=rank[b.status]!=null?rank[b.status]:0;
+    if(ra!==rb)return ra-rb;
+    var fa=fristInfo(a),fb=fristInfo(b);
+    var oa=fa.days!=null?fa.days:(fa.kind==="flex"?99990:99999);
+    var ob=fb.days!=null?fb.days:(fb.kind==="flex"?99990:99999);
+    return oa-ob;
+  });
+  var cards=sorted.map(function(c){
     var k=katInfo(c.kategorie),f=fristInfo(c);
     var nd=DOCS.filter(function(d){return d.contract_id===c.id;}).length;
     var badge='<span class="badge '+f.level+'">'+(f.kind==="flex"?"jederzeit kündbar":(f.kind==="fest"?"Frist: "+fmtDate(f.lastDay):escapeHtml(f.label)))+'</span>';
@@ -660,7 +764,7 @@ function viewContractForm(){
   (formPrefill?'<div class="ainote">🎩 Der Butler hat das Formular aus dem Dokument vorbefüllt. <b>Bitte prüfe alle Angaben</b>, bevor du speicherst.</div>':"")+
   '<div class="formrow">'+
    '<div><label class="f">Kategorie</label><select id="cf_kategorie">'+opts+'</select></div>'+
-   '<div><label class="f">Anbieter *</label><input type="text" id="cf_anbieter" value="'+escapeHtml(v("anbieter"))+'" placeholder="z. B. TeleMax GmbH"></div>'+
+   '<div><label class="f">Anbieter *</label><input type="text" id="cf_anbieter" list="anbieterList" value="'+escapeHtml(v("anbieter"))+'" placeholder="z. B. TeleMax GmbH"><datalist id="anbieterList">'+anbieterOptions()+'</datalist></div>'+
    '<div><label class="f">Tarif / Produkt</label><input type="text" id="cf_produkt" value="'+escapeHtml(v("produkt"))+'"></div>'+
    '<div><label class="f">Kundennummer</label><input type="text" id="cf_kundennummer" value="'+escapeHtml(v("kundennummer"))+'"></div>'+
    '<div><label class="f">Vertragsnummer</label><input type="text" id="cf_vertragsnummer" value="'+escapeHtml(v("vertragsnummer"))+'"></div>'+
@@ -671,9 +775,40 @@ function viewContractForm(){
    '<div><label class="f">Kosten (€)</label><input type="number" id="cf_kosten" min="0" step="0.01" value="'+escapeHtml(v("kosten","kosten"))+'"></div>'+
    '<div><label class="f">Zahlungsintervall</label><select id="cf_iv">'+ivOpts+'</select></div>'+
   '</div>'+
+  '<div id="cfPreview" class="ainote" hidden></div>'+
   '<label class="f">Notizen</label><textarea id="cf_notizen">'+escapeHtml(v("notizen"))+'</textarea>'+
   '<div class="btnrow"><button class="primary" data-action="save-contract">💾 Vertrag speichern</button><button class="ghost" data-nav="contracts">Abbrechen</button></div>'+
   '</section>';
+}
+function anbieterOptions(){
+  var seen={};
+  return CONTRACTS.map(function(c){return (c.anbieter||"").trim();}).filter(function(a){if(!a||seen[a.toLowerCase()])return false;seen[a.toLowerCase()]=1;return true;})
+    .map(function(a){return '<option value="'+escapeHtml(a)+'">';}).join("");
+}
+/* Live-Vorschau im Formular: rechnet Frist + Kosten schon während der Eingabe */
+function updateFormPreview(){
+  var box=$("#cfPreview");if(!box)return;
+  var c={status:"aktiv",
+    vertragsstart:$("#cf_vertragsstart").value||null,
+    mindestlaufzeit_monate:numOrNull($("#cf_ml").value),
+    kuendigungsfrist_monate:numOrNull($("#cf_kf").value),
+    verlaengerung_monate:numOrNull($("#cf_vl").value),
+    kosten:numOrNull($("#cf_kosten").value),
+    kosten_intervall:$("#cf_iv").value};
+  var parts=[];
+  if(c.vertragsstart&&c.mindestlaufzeit_monate!=null){
+    var f=fristInfo(c);
+    parts.push('<span class="dot '+f.level+'" style="display:inline-block;vertical-align:middle;margin-right:7px"></span><b>'+escapeHtml(f.label)+'</b>'+(f.sub?' – '+escapeHtml(f.sub):""));
+    if(c.vertragsstart>=NEUES_RECHT_AB&&c.mindestlaufzeit_monate>0&&(c.verlaengerung_monate==null||c.verlaengerung_monate>1))
+      parts.push('⚖️ Vertrag ab 3/2022: nach der Mindestlaufzeit automatisch monatlich kündbar – der Butler rechnet das bereits ein.');
+  }
+  var m=monatskosten(c);
+  if(m>0&&c.kosten_intervall!=="monatlich")parts.push('💶 Entspricht '+fmtEur(m)+' pro Monat ('+fmtEur(m*12)+' pro Jahr).');
+  else if(m>0)parts.push('💶 '+fmtEur(m*12)+' pro Jahr.');
+  if(c.kuendigungsfrist_monate!=null&&c.mindestlaufzeit_monate!=null&&c.mindestlaufzeit_monate>0&&c.kuendigungsfrist_monate>c.mindestlaufzeit_monate)
+    parts.push('⚠️ Die Kündigungsfrist ist länger als die Mindestlaufzeit – bitte prüfen.');
+  box.hidden=!parts.length;
+  box.innerHTML=parts.map(function(p){return '<div style="margin:2px 0">'+p+'</div>';}).join("");
 }
 async function onSaveContract(){
   var anbieter=($("#cf_anbieter").value||"").trim();
@@ -692,6 +827,21 @@ async function onSaveContract(){
     kosten_intervall:$("#cf_iv").value||"monatlich",
     notizen:($("#cf_notizen").value||"").trim()||null
   };
+  /* Plausibilitätsprüfung: der Butler warnt, blockiert aber nicht */
+  var warns=[];
+  if(cols.kuendigungsfrist_monate!=null&&cols.mindestlaufzeit_monate!=null&&cols.mindestlaufzeit_monate>0&&cols.kuendigungsfrist_monate>cols.mindestlaufzeit_monate)
+    warns.push("Die Kündigungsfrist ("+fristTxt(cols.kuendigungsfrist_monate)+") ist länger als die Mindestlaufzeit.");
+  if(cols.vertragsstart&&cols.vertragsstart>addMonthsISO(todayISO(),18))
+    warns.push("Der Vertragsbeginn liegt weit in der Zukunft ("+fmtDate(cols.vertragsstart)+").");
+  if(cols.vertragsstart&&cols.vertragsstart<"1990-01-01")
+    warns.push("Der Vertragsbeginn liegt ungewöhnlich weit zurück ("+fmtDate(cols.vertragsstart)+").");
+  if(cols.kosten!=null&&cols.kosten>3000&&cols.kosten_intervall==="monatlich")
+    warns.push("Monatliche Kosten von "+fmtEur(cols.kosten)+" sind ungewöhnlich hoch – Tippfehler?");
+  if(!editId){
+    var dup=CONTRACTS.find(function(x){return x.status==="aktiv"&&x.kategorie===cols.kategorie&&(x.anbieter||"").trim().toLowerCase()===anbieter.toLowerCase();});
+    if(dup)warns.push("Es gibt bereits einen aktiven "+katInfo(cols.kategorie).label+"-Vertrag von „"+(dup.anbieter||"?")+"“"+(dup.produkt?" ("+dup.produkt+")":"")+".");
+  }
+  if(warns.length&&!confirm("🎩 Der Butler ist stutzig:\n\n• "+warns.join("\n• ")+"\n\nTrotzdem speichern?"))return;
   try{
     var id=await saveContractData(cols,editId);
     if(pendingDoc&&!editId){try{await sb.from("documents").update({contract_id:id}).eq("id",pendingDoc);}catch(e){}}
@@ -757,8 +907,44 @@ function viewAdd(){
       var t=dtInfo(reviewDoc.doc_type),k=ext.kategorie?katInfo(ext.kategorie):null;
       var wichtig=(ext.wichtig&&ext.wichtig.length)?'<ul class="wichtig">'+ext.wichtig.map(function(w){return '<li>'+escapeHtml(w)+'</li>';}).join("")+'</ul>':"";
       var match=findMatch(ext);
-      var actions='<div class="btnrow">';
-      if(match)actions+='<button class="primary" data-action="review-link" data-id="'+match.id+'">🔗 Zu „'+escapeHtml(match.anbieter||"Vertrag")+'“ zuordnen</button>';
+      var smart=[],extraBtns="";
+      /* Duplikat-Erkennung */
+      var dup=DOCS.find(function(d){
+        if(d.id===reviewDoc.id)return false;
+        var dx=d.extracted;
+        if(dx&&ext.vertragsnummer&&dx.vertragsnummer===ext.vertragsnummer&&ext.datum&&dx.datum===ext.datum&&dx.docType===ext.docType)return true;
+        if(d.filename===reviewDoc.filename&&d.size_bytes===reviewDoc.size_bytes)return true;
+        return false;
+      });
+      if(dup)smart.push('⚠️ Ein sehr ähnliches Dokument liegt schon im Archiv („'+escapeHtml(dup.filename||"?")+'“ vom '+fmtDate(dup.doc_date||String(dup.created_at).slice(0,10))+') – möglicherweise doppelt hochgeladen.');
+      if(match){
+        /* Kündigung erkannt → Status-Aktion anbieten */
+        if(ext.docType==="kuendigung"&&match.status==="aktiv"){
+          smart.push('✂️ Das sieht nach einer Kündigung bzw. Kündigungsbestätigung für diesen Vertrag aus.');
+          extraBtns+='<button class="primary" data-action="review-cancel" data-id="'+match.id+'">✂️ „'+escapeHtml(match.anbieter||"Vertrag")+'“ als gekündigt markieren</button>';
+        }
+        /* Preisänderung erkannt → Übernahme anbieten */
+        if(ext.docType!=="rechnung"&&ext.kosten!=null&&match.kosten!=null&&Math.abs(ext.kosten-match.kosten)>=0.01&&(!ext.kostenIntervall||ext.kostenIntervall===match.kosten_intervall)){
+          var dir=ext.kosten>match.kosten?"steigt":"sinkt";
+          smart.push('💶 Der Preis '+dir+': bisher '+fmtEur(match.kosten)+', laut Dokument '+fmtEur(ext.kosten)+' ('+(INTERVALL_LABEL[match.kosten_intervall]||"")+').');
+          if(ext.kosten>match.kosten)smart.push('⚖️ Bei einer Preiserhöhung hast du oft ein <b>Sonderkündigungsrecht</b> – meist bis zum Wirksamwerden der Erhöhung.');
+          extraBtns+='<button class="ghost" data-action="review-price" data-id="'+match.id+'" data-price="'+ext.kosten+'" data-iv="'+escapeHtml(ext.kostenIntervall||"")+'">💶 Preis auf '+fmtEur(ext.kosten)+' aktualisieren</button>';
+        }
+        /* Rechnungsbetrag gegen vereinbarten Preis prüfen */
+        if(ext.docType==="rechnung"&&ext.betrag!=null&&match.kosten!=null){
+          var diff=ext.betrag-match.kosten;
+          if(Math.abs(diff)<=Math.max(0.5,match.kosten*0.02))smart.push('✅ Rechnungsbetrag '+fmtEur(ext.betrag)+' passt zum vereinbarten Preis ('+fmtEur(match.kosten)+' '+(INTERVALL_LABEL[match.kosten_intervall]||"")+').');
+          else smart.push('⚠️ Rechnungsbetrag '+fmtEur(ext.betrag)+' weicht um <b>'+fmtEur(diff)+'</b> vom vereinbarten Preis ab ('+fmtEur(match.kosten)+' '+(INTERVALL_LABEL[match.kosten_intervall]||"")+') – lohnt einen Blick.');
+        }
+        /* Dokument enthält Angaben, die dem Vertrag fehlen */
+        var fills=missingFills(match,ext);
+        if(fills.length){
+          smart.push('🧩 Das Dokument enthält Angaben, die deinem Vertrag noch fehlen: '+fills.map(function(f){return f.label;}).join(", ")+'.');
+          extraBtns+='<button class="ghost" data-action="review-complete" data-id="'+match.id+'">🧩 Fehlende Daten übernehmen</button>';
+        }
+      }
+      var actions='<div class="btnrow">'+extraBtns;
+      if(match)actions+='<button class="'+(extraBtns?"ghost":"primary")+'" data-action="review-link" data-id="'+match.id+'">🔗 Zu „'+escapeHtml(match.anbieter||"Vertrag")+'“ zuordnen</button>';
       actions+='<button class="'+(match?"ghost":"primary")+'" data-action="review-new">📑 Neuen Vertrag anlegen</button>';
       actions+='<button class="ghost" data-action="review-done">Nur im Archiv ablegen</button></div>';
       review='<section class="card"><h2 class="sect">🎩 Das hat der Butler gelesen</h2>'+
@@ -767,6 +953,7 @@ function viewAdd(){
         wichtig+
         (ext.hinweise?'<div class="ainote">💡 '+escapeHtml(ext.hinweise)+'</div>':"")+
         (match?'<div class="ainote">🔍 Das passt vermutlich zu deinem bestehenden Vertrag <b>'+escapeHtml(match.anbieter||"?")+(match.produkt?" – "+escapeHtml(match.produkt):"")+'</b>.</div>':"")+
+        smart.map(function(s){return '<div class="ainote">'+s+'</div>';}).join("")+
         actions+'</section>';
     }
   }
@@ -997,6 +1184,10 @@ function onAppClick(e){
     editId=null;activeView="contract-form";renderApp();
   }
   else if(act==="review-done"){reviewDoc=null;go("docs");toast("Im Archiv abgelegt ✅");}
+  else if(act==="review-cancel")reviewCancelContract(id);
+  else if(act==="review-price")reviewUpdatePrice(id,parseFloat(b.dataset.price),b.dataset.iv||null);
+  else if(act==="review-complete")reviewCompleteContract(id);
+  else if(act==="tip-ended"){(async function(){try{await saveContractData({status:"beendet"},id);await loadFromDB();renderApp();toast("Vertrag als beendet markiert ✅");}catch(e){toast("Fehlgeschlagen: "+errMsg(e),true);}})();}
   else if(act==="hh-switch")switchHousehold(id);
   else if(act==="hh-rename")renameHouseholdUI();
   else if(act==="hh-invite")inviteUI();
@@ -1008,6 +1199,12 @@ function onAppClick(e){
 function docLinkUI(docId){
   if(!CONTRACTS.length){toast("Lege zuerst einen Vertrag an, dann kannst du zuordnen.",true);return;}
   var d=DOCS.find(function(x){return x.id===docId;});if(!d)return;
+  /* intelligenter Vorschlag: der Butler prüft Kundennummer/Anbieter aus dem Dokument */
+  if(!d.contract_id&&d.extracted){
+    var sug=findMatch(d.extracted);
+    if(sug&&confirm("🎩 Vorschlag des Butlers: zu „"+(sug.anbieter||"?")+(sug.produkt?" – "+sug.produkt:"")+"“ zuordnen?"))
+      {linkDoc(docId,sug.id);return;}
+  }
   var list=CONTRACTS.map(function(c,i){return (i+1)+" = "+(c.anbieter||"?")+(c.produkt?" ("+c.produkt+")":"");}).join("\n");
   var input=prompt("Welchem Vertrag zuordnen?\n\n"+list+"\n\n0 = Zuordnung entfernen",d.contract_id?"":"1");
   if(input===null)return;
@@ -1017,6 +1214,7 @@ function docLinkUI(docId){
   linkDoc(docId,CONTRACTS[n-1].id);
 }
 function onAppChange(e){
+  if(e.target.id&&e.target.id.indexOf("cf_")===0){updateFormPreview();return;}
   if(e.target.id==="fileCam"||e.target.id==="filePick"){
     var f=e.target.files&&e.target.files[0];e.target.value="";
     if(f)onAddFile(f);
@@ -1025,6 +1223,7 @@ function onAppChange(e){
   else if(e.target.id==="df_typ"){docFilter.typ=e.target.value;renderApp();}
 }
 function onAppInput(e){
+  if(e.target.id&&e.target.id.indexOf("cf_")===0){updateFormPreview();return;}
   if(e.target.id==="df_q"){docFilter.q=e.target.value;
     clearTimeout(onAppInput._t);onAppInput._t=setTimeout(function(){var el=$("#df_q");var pos=el?el.selectionStart:0;renderApp();var el2=$("#df_q");if(el2){el2.focus();el2.setSelectionRange(pos,pos);}},350);}
 }
