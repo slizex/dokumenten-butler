@@ -184,6 +184,16 @@ textarea{min-height:74px;resize:vertical}
 .invmini{display:flex;align-items:flex-end;gap:3px;height:34px;margin:6px 0 2px}
 .invmini .imb{flex:1;background:color-mix(in srgb,var(--accent) 40%,transparent);border-radius:2px 2px 0 0;min-height:3px}
 
+/* ---- Gesundheit ---- */
+.medgroup{margin:0 0 18px}
+.medghead{display:flex;align-items:center;gap:9px;font-weight:650;font-size:.98rem;margin:0 0 8px;padding:0 2px}
+.medghead .fcount{color:var(--muted);font-weight:500;font-size:.82rem}
+.badge.fach{background:color-mix(in srgb,#0891b2 14%,transparent);color:#0e7490}
+body.dark .badge.fach{color:#67e8f9}
+.medfilter{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
+.medfilter select{width:auto;flex:1;min-width:150px}
+.behnote{font-size:.85rem;color:var(--muted);margin-top:2px;font-style:italic}
+
 /* ---- Butler-Tipps / Kosten-Aufschlüsselung ---- */
 .tiprow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 4px;border-bottom:1px solid var(--border);font-size:.9rem}
 .tiprow:last-child{border-bottom:none}
@@ -325,6 +335,40 @@ var DOCTYPE={
  schreiben:{label:"Schreiben",icon:"✉️"},
  sonstiges:{label:"Dokument",icon:"📄"}
 };
+/* Medizin: Fachrichtungen + Dokumentarten */
+var FACH={
+ hausarzt:{label:"Hausarzt",icon:"🩺"},
+ zahnarzt:{label:"Zahnarzt",icon:"🦷"},
+ kieferorthopaede:{label:"Kieferorthopäde",icon:"🦷"},
+ augenarzt:{label:"Augenarzt",icon:"👁️"},
+ orthopaede:{label:"Orthopäde",icon:"🦴"},
+ hautarzt:{label:"Hautarzt",icon:"🧴"},
+ hno:{label:"HNO-Arzt",icon:"👂"},
+ frauenarzt:{label:"Frauenarzt",icon:"🌸"},
+ urologe:{label:"Urologe",icon:"🩺"},
+ neurologe:{label:"Neurologe",icon:"🧠"},
+ kardiologe:{label:"Kardiologe",icon:"❤️"},
+ radiologe:{label:"Radiologe",icon:"🩻"},
+ kinderarzt:{label:"Kinderarzt",icon:"🧸"},
+ psychotherapie:{label:"Psychotherapie",icon:"🧠"},
+ physiotherapie:{label:"Physiotherapie",icon:"💪"},
+ apotheke:{label:"Apotheke",icon:"💊"},
+ labor:{label:"Labor",icon:"🧪"},
+ krankenhaus:{label:"Krankenhaus",icon:"🏥"},
+ sonstiges:{label:"Sonstige",icon:"⚕️"}
+};
+var MEDTYP={
+ rechnung:{label:"Arztrechnung",icon:"🧾"},
+ befund:{label:"Befund",icon:"📋"},
+ rezept:{label:"Rezept",icon:"💊"},
+ attest:{label:"Attest / AU",icon:"📃"},
+ laborwerte:{label:"Laborwerte",icon:"🧪"},
+ ueberweisung:{label:"Überweisung",icon:"➡️"},
+ impfung:{label:"Impfung",icon:"💉"},
+ roentgen:{label:"Röntgen / Bild",icon:"🩻"},
+ arztbrief:{label:"Arztbrief",icon:"✉️"},
+ sonstiges:{label:"Dokument",icon:"⚕️"}
+};
 var INTERVALL={monatlich:1,vierteljaehrlich:3,halbjaehrlich:6,jaehrlich:12};
 var INTERVALL_LABEL={monatlich:"monatlich",vierteljaehrlich:"vierteljährlich",halbjaehrlich:"halbjährlich",jaehrlich:"jährlich",einmalig:"einmalig"};
 var NEUES_RECHT_AB="2022-03-01";
@@ -342,6 +386,8 @@ var formPerson="";          /* vorgewählte Person fürs Formular */
 var pendingDoc=null;        /* zuletzt hochgeladenes Dokument (fürs Verknüpfen) */
 var reviewDoc=null;         /* Dokument im KI-Review */
 var docFilter={kat:"",typ:"",q:""};
+var medFilter={fach:"",typ:""};
+var medEditId=null;         /* medizinisches Dokument im Bearbeiten-Formular */
 var PERSON_COLORS=["#1d4ed8","#0891b2","#7c3aed","#c026d3","#db2777","#ea580c","#65a30d","#0d9488"];
 
 /* ---------- Helfer ---------- */
@@ -372,6 +418,9 @@ function toast(msg,err){
 }
 function katInfo(k){return KAT[k]||KAT.sonstiges;}
 function dtInfo(t){return DOCTYPE[t]||DOCTYPE.sonstiges;}
+function fachInfo(f){return FACH[f]||FACH.sonstiges;}
+function medTypInfo(t){return MEDTYP[t]||MEDTYP.sonstiges;}
+function isMed(d){return d.bereich==="medizin";}
 
 /* ---------- Fristenlogik ----------
    Liefert {kind, level, end, lastDay, days, label, sub, neuesRecht}
@@ -648,6 +697,14 @@ async function ingest(opts){
     var upd={extracted:ext,doc_type:(ext&&DOCTYPE[ext.docType])?ext.docType:"sonstiges",doc_date:(ext&&ext.datum)||null,zusammenfassung:(ext&&ext.zusammenfassung)||null};
     if(pm)upd.person_id=pm.id;
     else if(activePerson)upd.person_id=activePerson;
+    if(ext&&ext.istMedizin){
+      upd.bereich="medizin";
+      upd.fachrichtung=(ext.fachrichtung&&FACH[ext.fachrichtung])?ext.fachrichtung:"sonstiges";
+      upd.arzt=ext.arzt||null;
+      upd.med_typ=(ext.medTyp&&MEDTYP[ext.medTyp])?ext.medTyp:(ext.docType==="rechnung"?"rechnung":"sonstiges");
+      upd.betrag=(ext.betrag!=null?Number(ext.betrag):null);
+      upd.behandlungsdatum=ext.datum||null;
+    }
     var ru=await sb.from("documents").update(upd).eq("id",docRow.id);if(ru.error)throw ru.error;
   }catch(e){}
   hideAiWork();
@@ -864,11 +921,11 @@ function changeContractPersonUI(contractId){
 function go(view){activeView=view;if(view!=="contract-detail")detailId=null;renderApp();window.scrollTo({top:0,behavior:"smooth"});}
 function navItem(v,label,icon){return '<button class="tab'+(v===activeView?" active":"")+'" data-nav="'+v+'"><span class="tcon">'+icon+'</span>'+label+'</button>';}
 function renderTabs(){
-  var items=navItem("dashboard","Übersicht","🏠")+navItem("contracts","Verträge","📑")+navItem("docs","Dokumente","📁")+navItem("add","Hinzufügen","➕");
+  var items=navItem("dashboard","Übersicht","🏠")+navItem("contracts","Verträge","📑")+navItem("gesundheit","Gesundheit","🩺")+navItem("docs","Dokumente","📁")+navItem("add","Hinzufügen","➕");
   var t=$("#tabs");if(t)t.innerHTML=items;
   var f=$("#tabsFoot");if(f)f.innerHTML=navItem("settings","Einstellungen","⚙️");
-  var m=$("#tabsMobile");if(m)m.innerHTML=navItem("dashboard","Start","🏠")+navItem("contracts","Verträge","📑")+navItem("add","Neu","➕")+navItem("docs","Doku","📁")+navItem("settings","Konto","⚙️");
-  var titles={dashboard:"Übersicht",contracts:"Verträge","contract-detail":"Vertrag","contract-form":(editId?"Vertrag bearbeiten":"Neuer Vertrag"),docs:"Dokumente",add:"Dokument hinzufügen",settings:"Einstellungen"};
+  var m=$("#tabsMobile");if(m)m.innerHTML=navItem("dashboard","Start","🏠")+navItem("contracts","Verträge","📑")+navItem("gesundheit","Gesundheit","🩺")+navItem("add","Neu","➕")+navItem("docs","Doku","📁")+navItem("settings","Konto","⚙️");
+  var titles={dashboard:"Übersicht",contracts:"Verträge","contract-detail":"Vertrag","contract-form":(editId?"Vertrag bearbeiten":"Neuer Vertrag"),gesundheit:"Gesundheit","med-form":"Arzt-Dokument bearbeiten",docs:"Dokumente",add:"Dokument hinzufügen",settings:"Einstellungen"};
   var pt=$("#pageTitle");if(pt)pt.textContent=titles[activeView]||"Butler";
 }
 function renderApp(){
@@ -879,6 +936,8 @@ function renderApp(){
   else if(activeView==="contracts")app.innerHTML=viewContracts();
   else if(activeView==="contract-detail")app.innerHTML=viewContractDetail();
   else if(activeView==="contract-form"){app.innerHTML=viewContractForm();updateFormPreview();}
+  else if(activeView==="gesundheit")app.innerHTML=viewGesundheit();
+  else if(activeView==="med-form")app.innerHTML=viewMedForm();
   else if(activeView==="docs")app.innerHTML=viewDocs();
   else if(activeView==="add")app.innerHTML=viewAdd();
   else if(activeView==="settings"){app.innerHTML=viewSettings();refreshHhMeta();}
@@ -920,11 +979,11 @@ function butlerTips(CS,DS){
     if(c.status==="gekuendigt"&&c.gekuendigt_zum&&c.gekuendigt_zum<todayISO())
       tips.push({txt:'„'+escapeHtml(c.anbieter||"?")+'“ war zum '+fmtDate(c.gekuendigt_zum)+' gekündigt und ist inzwischen abgelaufen.',btn:"Als beendet markieren",action:"tip-ended",id:c.id});
   });
-  var unlinked=DS.filter(function(d){return !d.contract_id&&["vertrag","rechnung","police","preisaenderung","kuendigung"].indexOf(d.doc_type)>=0;}).length;
+  var unlinked=DS.filter(function(d){return !isMed(d)&&!d.contract_id&&["vertrag","rechnung","police","preisaenderung","kuendigung"].indexOf(d.doc_type)>=0;}).length;
   if(unlinked)tips.push({txt:unlinked+(unlinked===1?" Dokument ist":" Dokumente sind")+" noch keinem Vertrag zugeordnet – zugeordnet findet der Butler sie schneller wieder.",btn:"Ansehen",nav:"docs"});
   /* Dokumente ohne Person (nur wenn es überhaupt Personen gibt) */
   if(PERSONS.length){
-    var noperson=DS.filter(function(d){return !d.person_id&&["vertrag","rechnung","police"].indexOf(d.doc_type)>=0;}).length;
+    var noperson=DS.filter(function(d){return !d.person_id&&(isMed(d)||["vertrag","rechnung","police"].indexOf(d.doc_type)>=0);}).length;
     if(noperson&&!activePerson)tips.push({txt:noperson+(noperson===1?" Dokument ist":" Dokumente sind")+" noch keiner Person zugeordnet – ordne sie zu, um klar zu trennen, wem was gehört.",btn:"Ansehen",nav:"docs"});
   }
   if(!tips.length)return "";
@@ -1202,6 +1261,7 @@ async function setContractStatus(id,status){
 /* ---- Dokumente ---- */
 function docRow(d){
   var t=dtInfo(d.doc_type);
+  if(isMed(d))return medRow(d);
   var c=d.contract_id?contractById(d.contract_id):null;
   var kat=(d.extracted&&d.extracted.kategorie)?katInfo(d.extracted.kategorie):null;
   return '<div class="docrow"><span class="dicon">'+t.icon+'</span>'+
@@ -1211,6 +1271,20 @@ function docRow(d){
     (c?'<span>🔗 '+escapeHtml(c.anbieter||"Vertrag")+'</span>':'<span class="muted">ohne Vertrag</span>')+'</div></div>'+
     '<div class="dact"><button class="ghost" data-action="doc-view" data-id="'+d.id+'">👁️ Ansehen</button>'+
     '<button class="ghost" data-action="doc-link" data-id="'+d.id+'">🔗 Zuordnen</button>'+
+    '<button class="ghost" data-action="to-med" data-id="'+d.id+'" title="In den Gesundheitsbereich verschieben">🩺</button>'+
+    '<button class="danger" data-action="doc-del" data-id="'+d.id+'">🗑️</button></div></div>';
+}
+/* Zeile für ein medizinisches Dokument */
+function medRow(d){
+  var mt=medTypInfo(d.med_typ),fa=d.fachrichtung?fachInfo(d.fachrichtung):null;
+  var beh=(d.extracted&&d.extracted.behandlung)?d.extracted.behandlung:"";
+  return '<div class="docrow"><span class="dicon">'+mt.icon+'</span>'+
+    '<div class="dbody"><div class="dname">'+(fa?fa.icon+' ':"")+escapeHtml(d.arzt||(fa?fa.label:"Arzt-Dokument"))+'</div>'+
+    (beh?'<div class="behnote">'+escapeHtml(beh)+'</div>':(d.zusammenfassung?'<div class="dsum">'+escapeHtml(d.zusammenfassung)+'</div>':""))+
+    '<div class="dmeta">'+(d.person_id?personBadge(d.person_id):"")+(fa?'<span class="badge fach">'+fa.icon+' '+fa.label+'</span>':"")+'<span>'+mt.label+'</span>'+
+    '<span>'+fmtDate(d.behandlungsdatum||d.doc_date||String(d.created_at).slice(0,10))+'</span>'+(d.betrag!=null?'<span><b>'+fmtEur(d.betrag)+'</b></span>':"")+'</div></div>'+
+    '<div class="dact"><button class="ghost" data-action="doc-view" data-id="'+d.id+'">👁️ Ansehen</button>'+
+    '<button class="ghost" data-action="med-edit" data-id="'+d.id+'">✏️ Bearbeiten</button>'+
     '<button class="danger" data-action="doc-del" data-id="'+d.id+'">🗑️</button></div></div>';
 }
 function viewDocs(){
@@ -1218,16 +1292,149 @@ function viewDocs(){
   var katOpts='<option value="">Alle Kategorien</option>'+Object.keys(kats).map(function(k){return '<option value="'+k+'"'+(docFilter.kat===k?" selected":"")+'>'+katInfo(k).icon+' '+katInfo(k).label+'</option>';}).join("");
   var typOpts='<option value="">Alle Typen</option>'+Object.keys(DOCTYPE).map(function(k){return '<option value="'+k+'"'+(docFilter.typ===k?" selected":"")+'>'+DOCTYPE[k].label+'</option>';}).join("");
   var list=filterPerson(DOCS).filter(function(d){
+    if(isMed(d))return false;
     if(docFilter.typ&&d.doc_type!==docFilter.typ)return false;
     if(docFilter.kat&&!(d.extracted&&d.extracted.kategorie===docFilter.kat))return false;
     if(docFilter.q){var q=docFilter.q.toLowerCase();var hay=((d.filename||"")+" "+(d.zusammenfassung||"")+" "+JSON.stringify(d.extracted||{})).toLowerCase();if(hay.indexOf(q)<0)return false;}
     return true;
   });
-  var rows=list.length?list.map(docRow).join(""):'<p class="muted">Keine Dokumente'+(DOCS.length?" für diesen Filter":"")+'.</p>';
+  var rows=list.length?list.map(docRow).join(""):'<p class="muted">Keine Vertrags-/Haushaltsdokumente'+(DOCS.length?" für diesen Filter":"")+'. Arzt-Dokumente findest du unter 🩺 Gesundheit.</p>';
   return personBar()+
     '<div class="filterbar"><select id="df_kat">'+katOpts+'</select><select id="df_typ">'+typOpts+'</select><input type="text" id="df_q" placeholder="Suchen …" value="'+escapeHtml(docFilter.q)+'"></div>'+
     '<section class="card">'+rows+'</section>'+
     '<button class="bigadd" data-nav="add">➕ &nbsp;Weiteres Dokument hinzufügen</button>';
+}
+
+/* ---- Gesundheit ---- */
+function viewGesundheit(){
+  var meds=filterPerson(DOCS).filter(isMed);
+  if(!DOCS.filter(isMed).length){
+    return personBar()+'<section class="card"><h2 class="sect">🩺 Gesundheit</h2>'+
+      '<p class="muted">Hier sammelt der Butler alle Arzt- und Gesundheitsdokumente – Rechnungen, Befunde, Rezepte, Atteste. Lade einfach ein Dokument hoch: der Butler erkennt automatisch die Fachrichtung (Zahnarzt, Hausarzt …), den Arzt und den Betrag und legt es hier sauber ab. Du kannst alles danach anpassen.</p>'+
+      '<div class="btnrow"><button class="primary" data-nav="add">➕ Arzt-Dokument hochladen</button></div></section>';
+  }
+  /* KPI: Arztkosten laufendes Jahr (gefiltert) */
+  var jahr=todayISO().slice(0,4);
+  var kostenJahr=meds.reduce(function(s,d){var dt=(d.behandlungsdatum||d.doc_date||"");return (d.betrag!=null&&String(dt).slice(0,4)===jahr)?s+Number(d.betrag):s;},0);
+  var kostenGesamt=meds.reduce(function(s,d){return d.betrag!=null?s+Number(d.betrag):s;},0);
+  /* Filter-Optionen aus vorhandenen Fachrichtungen/Typen */
+  var fachSet={},typSet={};meds.forEach(function(d){if(d.fachrichtung)fachSet[d.fachrichtung]=1;if(d.med_typ)typSet[d.med_typ]=1;});
+  var fachOpts='<option value="">Alle Fachrichtungen</option>'+Object.keys(fachSet).map(function(f){return '<option value="'+f+'"'+(medFilter.fach===f?" selected":"")+'>'+fachInfo(f).icon+' '+fachInfo(f).label+'</option>';}).join("");
+  var typOpts='<option value="">Alle Arten</option>'+Object.keys(typSet).map(function(tk){return '<option value="'+tk+'"'+(medFilter.typ===tk?" selected":"")+'>'+medTypInfo(tk).label+'</option>';}).join("");
+  var filtered=meds.filter(function(d){
+    if(medFilter.fach&&d.fachrichtung!==medFilter.fach)return false;
+    if(medFilter.typ&&d.med_typ!==medFilter.typ)return false;
+    return true;
+  });
+  /* nach Fachrichtung gruppieren, je Gruppe nach Datum absteigend */
+  var groups={};
+  filtered.forEach(function(d){var f=d.fachrichtung||"sonstiges";(groups[f]=groups[f]||[]).push(d);});
+  var order=Object.keys(groups).sort(function(a,b){return fachInfo(a).label.localeCompare(fachInfo(b).label);});
+  var body=order.map(function(f){
+    var fa=fachInfo(f),rows=groups[f].sort(function(a,b){return String(b.behandlungsdatum||b.doc_date||"").localeCompare(String(a.behandlungsdatum||a.doc_date||""));});
+    var sum=rows.reduce(function(s,d){return d.betrag!=null?s+Number(d.betrag):s;},0);
+    return '<div class="medgroup"><div class="medghead">'+fa.icon+' '+escapeHtml(fa.label)+' <span class="fcount">· '+rows.length+' Dok.'+(sum>0?' · '+fmtEur(sum):"")+'</span></div>'+
+      '<section class="card" style="padding:8px 16px">'+rows.map(medRow).join("")+'</section></div>';
+  }).join("");
+  var kpi='<div class="kpis"><div class="kpi"><div class="klabel">Arztkosten '+jahr+'</div><div class="kval">'+fmtEur(kostenJahr)+'</div><div class="ksub">'+meds.length+' Dokumente</div></div>'+
+    '<div class="kpi"><div class="klabel">Kosten gesamt</div><div class="kval">'+fmtEur(kostenGesamt)+'</div><div class="ksub">erfasst</div></div></div>';
+  return personBar()+kpi+
+    '<div class="medfilter"><select id="mf_fach">'+fachOpts+'</select><select id="mf_typ">'+typOpts+'</select></div>'+
+    (filtered.length?body:'<section class="card"><p class="muted">Keine Dokumente für diesen Filter.</p></section>')+
+    '<button class="bigadd" data-nav="add">➕ &nbsp;Arzt-Dokument hinzufügen</button>';
+}
+function viewMedForm(){
+  var d=DOCS.find(function(x){return x.id===medEditId;});
+  if(!d)return '<section class="card"><p class="muted">Dokument nicht gefunden.</p></section>';
+  var fachOpts=Object.keys(FACH).map(function(f){return '<option value="'+f+'"'+(f===(d.fachrichtung||"sonstiges")?" selected":"")+'>'+FACH[f].icon+' '+FACH[f].label+'</option>';}).join("");
+  var typOpts=Object.keys(MEDTYP).map(function(tk){return '<option value="'+tk+'"'+(tk===(d.med_typ||"sonstiges")?" selected":"")+'>'+MEDTYP[tk].icon+' '+MEDTYP[tk].label+'</option>';}).join("");
+  var curPerson=d.person_id||"";
+  var personOpts='<option value="">— keine —</option>'+PERSONS.map(function(pp){return '<option value="'+pp.id+'"'+(pp.id===curPerson?" selected":"")+'>'+escapeHtml(pp.name)+'</option>';}).join("");
+  var personField=PERSONS.length?('<div><label class="f">Person (Patient)</label><select id="mf_person">'+personOpts+'</select></div>'):('<div><label class="f">Person (Patient)</label><button class="ghost" data-action="person-add-inline" style="width:100%">➕ Erste Person anlegen</button></div>');
+  var beh=(d.extracted&&d.extracted.behandlung)?d.extracted.behandlung:"";
+  return '<button class="linkbtn" data-nav="gesundheit" style="margin-bottom:12px">← Zurück zur Gesundheit</button>'+
+  '<section class="card"><h2 class="sect">✏️ Arzt-Dokument bearbeiten</h2>'+
+  '<p class="muted" style="margin-bottom:6px">Datei: '+escapeHtml(d.filename||"–")+'</p>'+
+  '<div class="formrow">'+
+   '<div><label class="f">Fachrichtung</label><select id="mf_e_fach">'+fachOpts+'</select></div>'+
+   personField+
+   '<div><label class="f">Arzt / Praxis / Klinik</label><input type="text" id="mf_e_arzt" value="'+escapeHtml(d.arzt||"")+'"></div>'+
+   '<div><label class="f">Dokumentart</label><select id="mf_e_typ">'+typOpts+'</select></div>'+
+   '<div><label class="f">Behandlungsdatum</label><input type="date" id="mf_e_datum" value="'+escapeHtml(d.behandlungsdatum||d.doc_date||"")+'"></div>'+
+   '<div><label class="f">Betrag (€, bei Rechnung)</label><input type="number" id="mf_e_betrag" min="0" step="0.01" value="'+(d.betrag!=null?d.betrag:"")+'"></div>'+
+  '</div>'+
+  '<label class="f">Behandlung / Anlass</label><textarea id="mf_e_beh">'+escapeHtml(beh)+'</textarea>'+
+  '<label class="f">Notiz</label><textarea id="mf_e_note">'+escapeHtml(d.note||"")+'</textarea>'+
+  '<div class="btnrow"><button class="primary" data-action="med-save">💾 Speichern</button>'+
+   '<button class="ghost" data-action="med-tovertrag" data-id="'+d.id+'">↩️ Kein Arzt-Dokument (zurück zu Dokumente)</button>'+
+   '<button class="ghost" data-nav="gesundheit">Abbrechen</button></div>'+
+  '</section>';
+}
+async function onSaveMed(){
+  var d=DOCS.find(function(x){return x.id===medEditId;});if(!d)return;
+  var pf=$("#mf_person");
+  var beh=($("#mf_e_beh").value||"").trim();
+  var ext=Object.assign({},d.extracted||{});ext.behandlung=beh||null;
+  var cols={
+    bereich:"medizin",
+    fachrichtung:$("#mf_e_fach").value||"sonstiges",
+    arzt:($("#mf_e_arzt").value||"").trim()||null,
+    med_typ:$("#mf_e_typ").value||"sonstiges",
+    behandlungsdatum:$("#mf_e_datum").value||null,
+    betrag:numOrNull($("#mf_e_betrag").value),
+    note:($("#mf_e_note").value||"").trim()||null,
+    person_id:(pf&&pf.value)?pf.value:null,
+    extracted:ext
+  };
+  try{
+    var r=await sb.from("documents").update(cols).eq("id",d.id);if(r.error)throw r.error;
+    medEditId=null;await loadFromDB();activeView="gesundheit";renderApp();toast("Arzt-Dokument gespeichert ✅");
+  }catch(e){toast("Speichern fehlgeschlagen: "+errMsg(e),true);}
+}
+/* Dokument in den Gesundheitsbereich verschieben bzw. zurück */
+async function toMedical(docId){
+  var d=DOCS.find(function(x){return x.id===docId;});if(!d)return;
+  var ext=d.extracted||{};
+  var cols={bereich:"medizin",contract_id:null,
+    fachrichtung:d.fachrichtung||(ext.fachrichtung&&FACH[ext.fachrichtung]?ext.fachrichtung:"sonstiges"),
+    med_typ:d.med_typ||(ext.medTyp&&MEDTYP[ext.medTyp]?ext.medTyp:(d.doc_type==="rechnung"?"rechnung":"sonstiges")),
+    arzt:d.arzt||ext.arzt||null,
+    betrag:(d.betrag!=null?d.betrag:(ext.betrag!=null?Number(ext.betrag):null)),
+    behandlungsdatum:d.behandlungsdatum||d.doc_date||null};
+  try{var r=await sb.from("documents").update(cols).eq("id",docId);if(r.error)throw r.error;
+    await loadFromDB();medEditId=docId;activeView="med-form";renderApp();toast("Ins Gesundheitsarchiv verschoben – bitte prüfen ✅");}
+  catch(e){toast("Verschieben fehlgeschlagen: "+errMsg(e),true);}
+}
+async function fromMedical(docId){
+  try{var r=await sb.from("documents").update({bereich:"vertrag"}).eq("id",docId);if(r.error)throw r.error;
+    medEditId=null;await loadFromDB();activeView="docs";renderApp();toast("Zurück zu den Dokumenten verschoben ✅");}
+  catch(e){toast("Verschieben fehlgeschlagen: "+errMsg(e),true);}
+}
+/* Medizin-Review-Karte (statt Vertrags-Review) */
+function medReviewCard(rd,ext){
+  var fa=fachInfo(rd.fachrichtung||"sonstiges"),mt=medTypInfo(rd.med_typ||"sonstiges");
+  var wichtig=(ext.wichtig&&ext.wichtig.length)?'<ul class="wichtig">'+ext.wichtig.map(function(w){return '<li>'+escapeHtml(w)+'</li>';}).join("")+'</ul>':"";
+  var smart=[];
+  if(rd.person_id)smart.push('👤 Patient: '+personBadge(rd.person_id)+'.');
+  else if(ext.vertragspartner){
+    var pm=matchPerson(ext.vertragspartner);
+    if(pm)smart.push('👤 Patient „'+escapeHtml(ext.vertragspartner)+'“ → '+personBadge(pm.id)+'.');
+    else smart.push('👤 Patient laut Dokument: <b>'+escapeHtml(ext.vertragspartner)+'</b> – als Person anlegen? (im Bearbeiten unten)');
+  }
+  var extraBtns="";
+  if(!rd.person_id&&ext.vertragspartner&&!matchPerson(ext.vertragspartner))
+    extraBtns+='<button class="ghost" data-action="review-createperson" data-name="'+escapeHtml(ext.vertragspartner)+'">👤 Person „'+escapeHtml(ext.vertragspartner)+'“ anlegen</button>';
+  var actions='<div class="btnrow">'+extraBtns+
+    '<button class="primary" data-action="med-edit" data-id="'+rd.id+'">✏️ Prüfen / anpassen</button>'+
+    '<button class="ghost" data-action="review-med-done">✅ So ablegen</button></div>';
+  return '<section class="card"><h2 class="sect">🩺 Arzt-Dokument erkannt</h2>'+
+    '<p><b>'+fa.icon+' '+escapeHtml(fa.label)+'</b> · '+mt.icon+' '+mt.label+(rd.arzt?' · '+escapeHtml(rd.arzt):"")+(rd.betrag!=null?' · <b>'+fmtEur(rd.betrag)+'</b>':"")+'</p>'+
+    ((ext.behandlung)?'<p class="behnote" style="margin:6px 0">'+escapeHtml(ext.behandlung)+'</p>':(ext.zusammenfassung?'<p style="margin:8px 0">'+escapeHtml(ext.zusammenfassung)+'</p>':""))+
+    wichtig+
+    (ext.hinweise?'<div class="ainote">💡 '+escapeHtml(ext.hinweise)+'</div>':"")+
+    smart.map(function(s){return '<div class="ainote">'+s+'</div>';}).join("")+
+    '<div class="ainote">📁 Automatisch im Gesundheitsbereich abgelegt. Du kannst Fachrichtung, Arzt, Betrag und Person jederzeit anpassen.</div>'+
+    actions+'</section>';
 }
 
 /* ---- Hinzufügen (Upload + Review) ---- */
@@ -1235,7 +1442,9 @@ function viewAdd(){
   var review="";
   if(reviewDoc){
     var ext=reviewDoc.extracted||null;
-    if(ext){
+    if(ext&&isMed(reviewDoc)){
+      review=medReviewCard(reviewDoc,ext);
+    }else if(ext){
       var t=dtInfo(reviewDoc.doc_type),k=ext.kategorie?katInfo(ext.kategorie):null;
       var wichtig=(ext.wichtig&&ext.wichtig.length)?'<ul class="wichtig">'+ext.wichtig.map(function(w){return '<li>'+escapeHtml(w)+'</li>';}).join("")+'</ul>':"";
       var match=findMatch(ext);
@@ -1305,7 +1514,7 @@ function viewAdd(){
   var personHint=(activePerson&&personById(activePerson))?'<div class="ainote">👤 Neue Dokumente werden automatisch <b>'+escapeHtml(personById(activePerson).name)+'</b> zugeordnet (aktiver Personen-Filter).</div>':"";
   return review+
   '<section class="card"><h2 class="sect">➕ Dokument hinzufügen</h2>'+
-  '<p class="muted" style="margin-bottom:14px">PDF/Foto hochladen, Brief fotografieren oder eine E-Mail (.eml) ablegen – der Butler liest Laufzeit, Fristen, Preise, Kundennummern und den Vertragspartner automatisch aus. PDF-Anhänge aus E-Mails werden erkannt.</p>'+
+  '<p class="muted" style="margin-bottom:14px">PDF/Foto hochladen, Brief fotografieren oder eine E-Mail (.eml) ablegen. Der Butler erkennt automatisch, worum es geht: Verträge landen bei den Fristen, <b>Arztrechnungen und Arzt-Dokumente wandern in den 🩺 Gesundheitsbereich</b> – inklusive erkannter Fachrichtung, Arzt und Betrag.</p>'+
   personHint+
   '<div class="upzone">'+
    '<button class="upbtn" data-action="pick-cam"><span class="uic">📷</span>Brief fotografieren<span class="usub">Kamera öffnet sich direkt</span></button>'+
@@ -1531,6 +1740,11 @@ function onAppClick(e){
   else if(act==="doc-view")viewDoc(id);
   else if(act==="doc-del")deleteDoc(id);
   else if(act==="doc-link")docLinkUI(id);
+  else if(act==="to-med")toMedical(id);
+  else if(act==="med-edit"){medEditId=id;if(reviewDoc&&reviewDoc.id===id)reviewDoc=null;activeView="med-form";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
+  else if(act==="med-save")onSaveMed();
+  else if(act==="med-tovertrag")fromMedical(id);
+  else if(act==="review-med-done"){reviewDoc=null;go("gesundheit");toast("Im Gesundheitsbereich abgelegt ✅");}
   else if(act==="pick-cam"){var fc=$("#fileCam");if(fc)fc.click();}
   else if(act==="pick-file"){var fp=$("#filePick");if(fp)fp.click();}
   else if(act==="review-link"){if(reviewDoc)linkDoc(reviewDoc.id,id).then(function(){reviewDoc=null;detailId=id;activeView="contract-detail";renderApp();});}
@@ -1584,6 +1798,8 @@ function onAppChange(e){
   }
   else if(e.target.id==="df_kat"){docFilter.kat=e.target.value;renderApp();}
   else if(e.target.id==="df_typ"){docFilter.typ=e.target.value;renderApp();}
+  else if(e.target.id==="mf_fach"){medFilter.fach=e.target.value;renderApp();}
+  else if(e.target.id==="mf_typ"){medFilter.typ=e.target.value;renderApp();}
 }
 function onAppInput(e){
   if(e.target.id&&e.target.id.indexOf("cf_")===0){updateFormPreview();return;}
