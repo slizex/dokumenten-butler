@@ -647,82 +647,78 @@ function compressImage(file){
   });
 }
 function isEmlFile(file){return file.type==="message/rfc822"||/\.eml$/i.test(file.name||"");}
-async function onAddFile(file){
-  if(!file)return;
+var importResults=[],importBusy=false;
+
+/* Mehrere Dateien nacheinander automatisch einlesen + einsortieren */
+async function processFiles(files){
+  files=Array.prototype.slice.call(files||[]).filter(Boolean);
+  if(!files.length)return;
+  if(!currentUser){pendingSharedFile=files[0];return;}
   if(!activeHousehold){toast("Kein Haushalt aktiv.",true);return;}
-  if(isEmlFile(file)){return onAddEmail(file);}
+  importResults=[];importBusy=true;reviewDoc=null;activeView="add";renderApp();
+  var n=files.length;
+  for(var i=0;i<n;i++){
+    showAiWork(n>1?("🎩 Dokument "+(i+1)+" von "+n+" wird gelesen …"):"🎩 Der Butler liest das Dokument … (ca. 10–30 Sek.)");
+    try{await prepareAndIngest(files[i]);}
+    catch(e){importResults.push({name:(files[i].name||"Datei"),icon:"⚠️",text:errMsg(e),view:null});}
+  }
+  importBusy=false;hideAiWork();
+  try{await loadFromDB();}catch(e){}
+  activeView="add";renderApp();
+  if(importResults.length)toast(importResults.length+(importResults.length===1?" Dokument":" Dokumente")+" eingelesen ✅");
+}
+async function prepareAndIngest(file){
+  if(isEmlFile(file))return prepareEmail(file);
   var isPdf=file.type==="application/pdf"||/\.pdf$/i.test(file.name||"");
-  if(!isPdf&&!ALLOWED_IMG[file.type]&&!/^image\//.test(file.type)){toast("Bitte ein PDF, Foto (JPG/PNG) oder eine E-Mail (.eml) auswählen.",true);return;}
-  if(isPdf&&file.size>12*1024*1024){toast("Das PDF ist größer als 12 MB – bitte eine kleinere Datei verwenden.",true);return;}
-  showAiWork("Dokument wird vorbereitet …");
+  if(!isPdf&&!ALLOWED_IMG[file.type]&&!/^image\//.test(file.type))throw new Error("Format nicht unterstützt (nur PDF, Foto oder .eml)");
+  if(isPdf&&file.size>12*1024*1024)throw new Error("PDF größer als 12 MB");
   var blob=file,mime=file.type||"application/pdf",fname=file.name||("scan-"+Date.now()+".jpg");
-  try{
-    if(!isPdf){blob=await compressImage(file);mime="image/jpeg";fname=fname.replace(/\.[^.]+$/,"")+".jpg";}
-  }catch(e){hideAiWork();toast(errMsg(e),true);return;}
-  await ingest({blob:blob,mime:mime,fname:fname});
+  if(!isPdf){blob=await compressImage(file);mime="image/jpeg";fname=fname.replace(/\.[^.]+$/,"")+".jpg";}
+  return ingest({blob:blob,mime:mime,fname:fname});
 }
 /* E-Mail: .eml parsen, PDF-/Bild-Anhang bevorzugt analysieren, sonst den Text-Body */
-async function onAddEmail(file){
-  if(file.size>20*1024*1024){toast("Die E-Mail ist größer als 20 MB – bitte kleiner.",true);return;}
-  showAiWork("E-Mail wird gelesen …");
-  var raw="";
-  try{raw=await file.text();}catch(e){hideAiWork();toast("E-Mail konnte nicht gelesen werden.",true);return;}
-  var mail;
-  try{mail=parseEml(raw);}catch(e){mail={text:raw,attachments:[],subject:""};}
+async function prepareEmail(file){
+  if(file.size>20*1024*1024)throw new Error("E-Mail größer als 20 MB");
+  var raw=await file.text();
+  var mail;try{mail=parseEml(raw);}catch(e){mail={text:raw,attachments:[],subject:""};}
   var att=(mail.attachments||[]).filter(function(a){return a.mime==="application/pdf"||/^image\//.test(a.mime);});
   var emlName=(file.name||"email.eml");
   if(att.length){
     var a=att[0];
-    var extra=att.length>1?" (E-Mail hatte "+att.length+" Anhänge – der erste wird analysiert)":"";
-    var isImg=/^image\//.test(a.mime);
-    var blob=new Blob([a.bytes],{type:a.mime}),mime=a.mime,fname=a.filename||("anhang"+(a.mime==="application/pdf"?".pdf":".bin"));
-    try{if(isImg&&a.mime!=="image/jpeg"){/* Bilder unkomprimiert lassen, PNG/JPG akzeptiert die KI direkt */}}catch(e){}
-    toast("📧 Anhang aus E-Mail erkannt: "+fname+extra);
-    await ingest({blob:blob,mime:mime,fname:fname,emailFrom:emlName,emailSubject:mail.subject});
-  }else{
-    /* kein Anhang → E-Mail-Text analysieren, Original .eml archivieren */
-    var body=(mail.text||raw||"").trim();
-    if(!body){hideAiWork();toast("In der E-Mail war kein lesbarer Inhalt.",true);return;}
-    var emlBlob=new Blob([raw],{type:"message/rfc822"});
-    await ingest({blob:emlBlob,mime:"message/rfc822",fname:emlName,textContent:body,emailSubject:mail.subject});
+    var blob=new Blob([a.bytes],{type:a.mime}),fname=a.filename||("anhang"+(a.mime==="application/pdf"?".pdf":".bin"));
+    return ingest({blob:blob,mime:a.mime,fname:fname,emailFrom:emlName,emailSubject:mail.subject});
   }
+  var body=(mail.text||raw||"").trim();
+  if(!body)throw new Error("Kein lesbarer Inhalt in der E-Mail");
+  return ingest({blob:new Blob([raw],{type:"message/rfc822"}),mime:"message/rfc822",fname:emlName,textContent:body,emailSubject:mail.subject});
 }
-/* Gemeinsamer Kern: Datei ins Archiv, KI-Analyse, Ergebnis speichern, Review öffnen.
-   opts: {blob,mime,fname,textContent?,emailFrom?,emailSubject?} */
+/* Einzeldatei (native Kamera, Teilen, Drive) laufen über denselben Weg */
+function onAddFile(file){return processFiles([file]);}
+
+/* Kern: ablegen, KI, speichern, dann automatisch einsortieren. Gibt ein Ergebnis zurück. */
 async function ingest(opts){
-  showAiWork("Dokument wird sicher abgelegt …");
-  var docRow=null;
+  var safe=(opts.fname||"dokument").replace(/[^\wäöüÄÖÜß.\-]+/g,"_").slice(-80);
+  var path=activeHousehold+"/"+Date.now()+"_"+Math.random().toString(36).slice(2,7)+"_"+safe;
+  var up=await sb.storage.from(BUCKET).upload(path,opts.blob,{contentType:opts.mime,upsert:false});
+  if(up.error)throw up.error;
+  var note=opts.emailSubject?("Aus E-Mail: "+opts.emailSubject):(opts.emailFrom?"Aus E-Mail-Anhang":null);
+  var ins=await sb.from("documents").insert({household_id:activeHousehold,filename:opts.fname,storage_path:path,mime_type:opts.mime,size_bytes:opts.blob.size,doc_type:"sonstiges",note:note}).select("*").single();
+  if(ins.error)throw ins.error;
+  var docRow=ins.data,ext=null;
   try{
-    var safe=(opts.fname||"dokument").replace(/[^\wäöüÄÖÜß.\-]+/g,"_").slice(-80);
-    var path=activeHousehold+"/"+Date.now()+"_"+safe;
-    var up=await sb.storage.from(BUCKET).upload(path,opts.blob,{contentType:opts.mime,upsert:false});
-    if(up.error)throw up.error;
-    var note=opts.emailSubject?("Aus E-Mail: "+opts.emailSubject):(opts.emailFrom?"Aus E-Mail-Anhang":null);
-    var ins=await sb.from("documents").insert({household_id:activeHousehold,filename:opts.fname,storage_path:path,mime_type:opts.mime,size_bytes:opts.blob.size,doc_type:"sonstiges",note:note}).select("*").single();
-    if(ins.error)throw ins.error;
-    docRow=ins.data;
-  }catch(e){hideAiWork();toast("Ablegen fehlgeschlagen: "+errMsg(e),true);return;}
-  showAiWork("🎩 Der Butler liest das Dokument … (KI, ca. 10–30 Sek.)");
-  var ext=null;
-  try{
-    var reqBody;
-    if(opts.textContent){reqBody={textContent:opts.textContent};}
-    else{reqBody={fileBase64:await blobToBase64(opts.blob),mimeType:opts.mime};}
+    var reqBody=opts.textContent?{textContent:opts.textContent}:{fileBase64:await blobToBase64(opts.blob),mimeType:opts.mime};
     var r=await sb.functions.invoke(EDGE_FN,{body:reqBody});
     if(r.error)throw r.error;
-    var body=r.data||{};
-    if(body.error)throw new Error(body.error);
+    var body=r.data||{};if(body.error)throw new Error(body.error);
     ext=body.dokument||null;
   }catch(e){
-    hideAiWork();await loadFromDB();reviewDoc=null;
-    toast("Das Dokument wurde abgelegt, aber die KI-Analyse schlug fehl: "+errMsg(e),true);
-    go("docs");return;
+    var res0={name:opts.fname||"Dokument",icon:"⚠️",text:"abgelegt, aber KI-Analyse fehlgeschlagen",view:"docs",id:docRow.id};
+    importResults.push(res0);return res0;
   }
   try{
     var pm=(ext&&ext.vertragspartner)?matchPerson(ext.vertragspartner):null;
     var upd={extracted:ext,doc_type:(ext&&DOCTYPE[ext.docType])?ext.docType:"sonstiges",doc_date:(ext&&ext.datum)||null,zusammenfassung:(ext&&ext.zusammenfassung)||null};
-    if(pm)upd.person_id=pm.id;
-    else if(activePerson)upd.person_id=activePerson;
+    if(pm)upd.person_id=pm.id;else if(activePerson)upd.person_id=activePerson;
     if(ext&&ext.istMedizin){
       upd.bereich="medizin";
       upd.fachrichtung=(ext.fachrichtung&&FACH[ext.fachrichtung])?ext.fachrichtung:"sonstiges";
@@ -731,12 +727,67 @@ async function ingest(opts){
       upd.betrag=(ext.betrag!=null?Number(ext.betrag):null);
       upd.behandlungsdatum=ext.datum||null;
     }
-    var ru=await sb.from("documents").update(upd).eq("id",docRow.id);if(ru.error)throw ru.error;
+    await sb.from("documents").update(upd).eq("id",docRow.id);
   }catch(e){}
-  hideAiWork();
-  await loadFromDB();
-  reviewDoc=DOCS.find(function(d){return d.id===docRow.id;})||docRow;
-  activeView="add";renderApp();
+  var result=await autoFileDoc(docRow.id,ext);
+  importResults.push(result);
+  return result;
+}
+function blobToBase64(blob){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){var s=String(r.result||"");var i=s.indexOf(",");res(i>=0?s.slice(i+1):s);};r.onerror=function(){rej(new Error("Datei konnte nicht gelesen werden."));};r.readAsDataURL(blob);});}
+
+/* Vertragsspalten aus KI-Extraktion bauen (für Auto-Anlage) */
+function contractColsFromExt(ext){
+  function num(v){return (v!=null&&v!=="")?Number(v):null;}
+  return {
+    kategorie:(ext.kategorie&&KAT[ext.kategorie]&&ext.kategorie!=="gesundheit")?ext.kategorie:"sonstiges",
+    anbieter:ext.anbieter||null,produkt:ext.produkt||null,
+    kundennummer:ext.kundennummer||null,vertragsnummer:ext.vertragsnummer||null,
+    vertragsstart:ext.vertragsstart||null,
+    mindestlaufzeit_monate:num(ext.mindestlaufzeitMonate),
+    kuendigungsfrist_monate:num(ext.kuendigungsfristMonate),
+    verlaengerung_monate:num(ext.verlaengerungMonate),
+    kosten:num(ext.kosten),kosten_intervall:ext.kostenIntervall||"monatlich"
+  };
+}
+/* Automatisch einsortieren: Medizin→Gesundheit, Vertrag→verknüpfen/neu anlegen, sonst Archiv */
+async function autoFileDoc(docId,ext){
+  try{await loadFromDB();}catch(e){}
+  var d=DOCS.find(function(x){return x.id===docId;});
+  var name=(d&&d.filename)||"Dokument";
+  if(!d)return {name:name,icon:"📄",text:"abgelegt",view:"docs"};
+  if(isMed(d)){
+    var fa=fachInfo(d.fachrichtung||"sonstiges");
+    return {name:name,icon:fa.icon,text:"Gesundheit · "+fa.label+(d.med_typ?" · "+medTypInfo(d.med_typ).label:"")+(d.betrag!=null?" · "+fmtEur(d.betrag):""),view:"gesundheit"};
+  }
+  var match=ext?findMatch(ext):null;
+  if(match){
+    await linkDocSilent(d.id,match.id);
+    var notes=[];
+    if(ext&&ext.docType!=="rechnung"&&ext.kosten!=null&&match.kosten!=null&&Math.abs(ext.kosten-match.kosten)>=0.01)notes.push("Preis "+(ext.kosten>match.kosten?"gestiegen":"gesunken")+" auf "+fmtEur(ext.kosten)+" – im Vertrag prüfen");
+    if(ext&&ext.docType==="rechnung"&&ext.betrag!=null&&match.kosten!=null&&Math.abs(ext.betrag-match.kosten)>Math.max(0.5,match.kosten*0.02))notes.push("Rechnungsbetrag weicht vom Tarif ab");
+    return {name:name,icon:katInfo(match.kategorie).icon,text:"zu „"+(match.anbieter||"Vertrag")+"“ zugeordnet",view:"contract-detail",id:match.id,notes:notes};
+  }
+  if(ext&&(ext.docType==="vertrag"||ext.docType==="police")&&ext.anbieter){
+    try{
+      var cols=contractColsFromExt(ext);if(d.person_id)cols.person_id=d.person_id;
+      var newId=await saveContractData(cols,null);
+      await linkDocSilent(d.id,newId);
+      return {name:name,icon:katInfo(cols.kategorie).icon,text:"neuer Vertrag „"+ext.anbieter+"“ angelegt",view:"contract-detail",id:newId};
+    }catch(e){}
+  }
+  var kat=(ext&&ext.kategorie)?katInfo(ext.kategorie):null;
+  return {name:name,icon:(kat?kat.icon:dtInfo(d.doc_type).icon),text:"im Archiv abgelegt"+(kat?" · "+kat.label:""),view:"docs"};
+}
+function importSummaryCard(){
+  var items=importResults.map(function(r,i){
+    var act=r.view?('<button class="ghost" data-action="import-open" data-i="'+i+'">anpassen ›</button>'):"";
+    var notes=(r.notes&&r.notes.length)?'<div class="behnote">⚠️ '+r.notes.map(escapeHtml).join(" · ")+'</div>':"";
+    return '<div class="docrow"><span class="dicon">'+(r.icon||"📄")+'</span><div class="dbody"><div class="dname">'+escapeHtml(r.name)+'</div><div class="dsum">'+escapeHtml(r.text)+'</div>'+notes+'</div><div class="dact">'+act+'</div></div>';
+  }).join("");
+  return '<section class="card"><h2 class="sect">✅ Automatisch einsortiert</h2>'+
+    '<p class="muted" style="font-size:.9rem;margin-bottom:8px">Der Butler hat '+importResults.length+' Dokument'+(importResults.length===1?"":"e")+' gelesen und passend einsortiert. Passt etwas nicht? Tippe auf „anpassen".</p>'+
+    items+
+    '<div class="btnrow"><button class="primary" data-action="import-more">➕ Weitere hochladen</button><button class="ghost" data-nav="dashboard">Fertig</button></div></section>';
 }
 function blobToBase64(blob){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){var s=String(r.result||"");var i=s.indexOf(",");res(i>=0?s.slice(i+1):s);};r.onerror=function(){rej(new Error("Datei konnte nicht gelesen werden."));};r.readAsDataURL(blob);});}
 
@@ -1465,6 +1516,7 @@ function medReviewCard(rd,ext){
 
 /* ---- Hinzufügen (Upload + Review) ---- */
 function viewAdd(){
+  if(importResults.length&&!importBusy)return importSummaryCard();
   var review="";
   if(reviewDoc){
     var ext=reviewDoc.extracted||null;
@@ -1540,14 +1592,14 @@ function viewAdd(){
   var personHint=(activePerson&&personById(activePerson))?'<div class="ainote">👤 Neue Dokumente werden automatisch <b>'+escapeHtml(personById(activePerson).name)+'</b> zugeordnet (aktiver Personen-Filter).</div>':"";
   return review+
   '<section class="card"><h2 class="sect">➕ Dokument hinzufügen</h2>'+
-  '<p class="muted" style="margin-bottom:14px">PDF/Foto hochladen, Brief fotografieren oder eine E-Mail (.eml) ablegen. Der Butler erkennt automatisch, worum es geht: Verträge landen bei den Fristen, <b>Arztrechnungen und Arzt-Dokumente wandern in den 🩺 Gesundheitsbereich</b> – inklusive erkannter Fachrichtung, Arzt und Betrag.</p>'+
+  '<p class="muted" style="margin-bottom:14px"><b>Einfach hochladen – der Butler sortiert automatisch ein.</b> Du kannst auch mehrere Dateien auf einmal wählen. Er erkennt selbst, worum es geht: Verträge werden angelegt bzw. zugeordnet und bei den Fristen überwacht, Arztrechnungen wandern in den 🩺 Gesundheitsbereich (mit Fachrichtung, Arzt, Betrag), alles Übrige ins Archiv – jeweils mit erkannter Kategorie und Person.</p>'+
   personHint+
   '<div class="upzone">'+
    '<button class="upbtn" data-action="pick-cam"><span class="uic">📷</span>Brief fotografieren<span class="usub">Kamera öffnet sich direkt</span></button>'+
-   '<button class="upbtn" data-action="pick-file"><span class="uic">📄</span>Datei auswählen<span class="usub">PDF, Foto oder E-Mail (.eml) · auf Android auch aus Google Drive</span></button>'+
+   '<button class="upbtn" data-action="pick-file"><span class="uic">📄</span>Dateien auswählen<span class="usub">PDF, Fotos oder E-Mails (.eml) · mehrere möglich · auf Android auch aus Google Drive</span></button>'+
   '</div>'+
   '<input type="file" id="fileCam" accept="image/*" capture="environment" hidden>'+
-  '<input type="file" id="filePick" accept="application/pdf,image/*,message/rfc822,.eml" hidden>'+
+  '<input type="file" id="filePick" accept="application/pdf,image/*,message/rfc822,.eml" multiple hidden>'+
   '<div id="aiWork" class="aiwork" hidden><span class="spin"></span><span class="aimsg">…</span></div>'+
   '<p class="muted" style="font-size:.8rem;margin-top:14px">🔒 Deine Dokumente liegen verschlüsselt in deinem privaten Speicher und sind nur für deinen Haushalt sichtbar. Die KI-Analyse kostet weniger als 1 Cent pro Dokument.</p>'+
   '</section>';
@@ -1924,7 +1976,7 @@ function securityCard(){
 /* ---------- Events ---------- */
 function onAppClick(e){
   var nav=e.target.closest("[data-nav]");
-  if(nav){if(nav.dataset.nav==="add")reviewDoc=null;go(nav.dataset.nav);return;}
+  if(nav){if(nav.dataset.nav==="add"){reviewDoc=null;importResults=[];}go(nav.dataset.nav);return;}
   var b=e.target.closest("[data-action]");if(!b)return;
   var act=b.dataset.action,id=b.dataset.id;
   if(act==="open-contract"){detailId=id;activeView="contract-detail";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
@@ -1943,6 +1995,8 @@ function onAppClick(e){
   else if(act==="med-save")onSaveMed();
   else if(act==="med-tovertrag")fromMedical(id);
   else if(act==="review-med-done"){reviewDoc=null;go("gesundheit");toast("Im Gesundheitsbereich abgelegt ✅");}
+  else if(act==="import-more"){importResults=[];reviewDoc=null;renderApp();}
+  else if(act==="import-open"){var r=importResults[parseInt(b.dataset.i,10)];if(!r)return;importResults=[];if(r.view==="contract-detail"&&r.id){detailId=r.id;activeView="contract-detail";}else if(r.view){activeView=r.view;}else{activeView="docs";}renderApp();window.scrollTo({top:0,behavior:"smooth"});}
   else if(act==="pick-cam"){if(isNative())nativeCameraScan();else{var fc=$("#fileCam");if(fc)fc.click();}}
   else if(act==="pick-file"){var fp=$("#filePick");if(fp)fp.click();}
   else if(act==="review-link"){if(reviewDoc)linkDoc(reviewDoc.id,id).then(function(){reviewDoc=null;detailId=id;activeView="contract-detail";renderApp();});}
@@ -1993,8 +2047,8 @@ function docLinkUI(docId){
 function onAppChange(e){
   if(e.target.id&&e.target.id.indexOf("cf_")===0){updateFormPreview();return;}
   if(e.target.id==="fileCam"||e.target.id==="filePick"){
-    var f=e.target.files&&e.target.files[0];e.target.value="";
-    if(f)onAddFile(f);
+    var files=Array.prototype.slice.call(e.target.files||[]);e.target.value="";
+    if(files.length)processFiles(files);
   }
   else if(e.target.id==="df_kat"){docFilter.kat=e.target.value;renderApp();}
   else if(e.target.id==="df_typ"){docFilter.typ=e.target.value;renderApp();}
@@ -2018,7 +2072,7 @@ function init(){
   app.addEventListener("click",onAppClick);
   app.addEventListener("change",onAppChange);
   app.addEventListener("input",onAppInput);
-  function onNav(e){var b=e.target.closest("[data-nav]");if(b){if(b.dataset.nav==="add")reviewDoc=null;go(b.dataset.nav);}}
+  function onNav(e){var b=e.target.closest("[data-nav]");if(b){if(b.dataset.nav==="add"){reviewDoc=null;importResults=[];}go(b.dataset.nav);}}
   var t=$("#tabs");if(t)t.addEventListener("click",onNav);
   var tf=$("#tabsFoot");if(tf)tf.addEventListener("click",onNav);
   var tm=$("#tabsMobile");if(tm)tm.addEventListener("click",onNav);
