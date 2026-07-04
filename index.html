@@ -1640,6 +1640,7 @@ function viewSettings(){
     '<p class="muted" style="font-size:.9rem">Speicher belegt: <b>'+mb+'</b> ('+DOCS.length+(DOCS.length===1?" Dokument":" Dokumente")+')</p>'+
     '<div class="btnrow"><button class="ghost" data-action="export-json">⬇️ Vertragsdaten exportieren (JSON)</button></div>'+
   '</section>'+
+  gdriveCard()+
   securityCard()+
   '<section class="card"><h2 class="sect">ℹ️ Wie rechnet der Butler?</h2>'+
     '<p class="muted" style="font-size:.9rem">Kündbar zum = Vertragsbeginn + Mindestlaufzeit. Letzter Kündigungstag = dieses Datum minus Kündigungsfrist. 🔴 = weniger als 30 Tage, 🟡 = weniger als 90 Tage. Für Verträge ab dem 1. März 2022 gilt das Gesetz für faire Verbraucherverträge: Nach der Mindestlaufzeit sind sie jederzeit mit höchstens 1 Monat Frist kündbar – der Butler berücksichtigt das automatisch.</p>'+
@@ -1973,6 +1974,95 @@ function securityCard(){
   '</section>';
 }
 
+/* ---------- Google Drive verbinden (läuft im Browser/Laptop) ---------- */
+var GDRIVE_SCOPE="https://www.googleapis.com/auth/drive.readonly";
+var gdriveToken=null,gdriveTokenClient=null;
+function gdriveClientId(){try{return localStorage.getItem("db_gdrive_client")||"";}catch(e){return "";}}
+function gdriveFolderId(){try{return localStorage.getItem("db_gdrive_folder")||"";}catch(e){return "";}}
+function gdriveImportedSet(){try{return JSON.parse(localStorage.getItem("db_gdrive_imported")||"[]");}catch(e){return [];}}
+function addGdriveImported(ids){try{var s=gdriveImportedSet();ids.forEach(function(id){if(s.indexOf(id)<0)s.push(id);});localStorage.setItem("db_gdrive_imported",JSON.stringify(s.slice(-3000)));}catch(e){}}
+function extractFolderId(v){v=(v||"").trim();var m=v.match(/[-\w]{25,}/);return m?m[0]:v;}
+function loadGIS(){
+  return new Promise(function(res,rej){
+    if(window.google&&google.accounts&&google.accounts.oauth2)return res();
+    var s=document.createElement("script");s.src="https://accounts.google.com/gsi/client";s.async=true;s.defer=true;
+    s.onload=function(){res();};s.onerror=function(){rej(new Error("Google-Anmeldedienst konnte nicht geladen werden."));};
+    document.head.appendChild(s);
+  });
+}
+function gdriveGetToken(){
+  return new Promise(function(res,rej){
+    var cid=gdriveClientId();if(!cid)return rej(new Error("Bitte zuerst die Google Client-ID eintragen."));
+    loadGIS().then(function(){
+      try{
+        gdriveTokenClient=google.accounts.oauth2.initTokenClient({client_id:cid,scope:GDRIVE_SCOPE,callback:function(resp){
+          if(resp&&resp.access_token){gdriveToken=resp.access_token;res(resp.access_token);}
+          else rej(new Error("Keine Google-Freigabe erhalten."));
+        }});
+        gdriveTokenClient.requestAccessToken({prompt:gdriveToken?"":"consent"});
+      }catch(e){rej(e);}
+    }).catch(rej);
+  });
+}
+function saveGdriveConfig(){
+  var c=$("#gd_client"),f=$("#gd_folder");
+  try{
+    if(c)localStorage.setItem("db_gdrive_client",(c.value||"").trim());
+    if(f)localStorage.setItem("db_gdrive_folder",extractFolderId(f.value));
+  }catch(e){}
+  gdriveToken=null;
+  toast("Google-Drive-Einstellungen gespeichert ✅");
+  if(activeView==="settings")renderApp();
+}
+async function gdriveImport(){
+  var folder=gdriveFolderId();if(!folder){toast("Bitte zuerst den Drive-Ordner eintragen und speichern.",true);return;}
+  if(!gdriveClientId()){toast("Bitte zuerst die Google Client-ID eintragen und speichern.",true);return;}
+  toast("Verbinde mit Google Drive …");
+  var token;try{token=gdriveToken||await gdriveGetToken();}catch(e){toast("Google-Verbindung fehlgeschlagen: "+errMsg(e),true);return;}
+  var q="'"+folder+"' in parents and trashed=false and (mimeType='application/pdf' or mimeType contains 'image/')";
+  var url="https://www.googleapis.com/drive/v3/files?q="+encodeURIComponent(q)+"&fields=files(id,name,mimeType)&pageSize=200";
+  var list;
+  try{var r=await fetch(url,{headers:{Authorization:"Bearer "+token}});if(!r.ok)throw new Error("Drive-Abfrage "+r.status);list=await r.json();}
+  catch(e){toast("Drive-Ordner konnte nicht gelesen werden: "+errMsg(e),true);return;}
+  var files=list.files||[];
+  if(!files.length){toast("Im Ordner wurden keine PDFs oder Bilder gefunden.",true);return;}
+  var imported=gdriveImportedSet();
+  var neu=files.filter(function(f){return imported.indexOf(f.id)<0;});
+  if(!neu.length){toast("Alle "+files.length+" Dateien aus dem Ordner sind bereits importiert.");return;}
+  toast(neu.length+" neue Datei(en) werden aus Drive geholt …");
+  var toImport=[],okIds=[];
+  for(var i=0;i<neu.length;i++){
+    try{
+      var dr=await fetch("https://www.googleapis.com/drive/v3/files/"+neu[i].id+"?alt=media",{headers:{Authorization:"Bearer "+token}});
+      if(!dr.ok)continue;
+      var blob=await dr.blob();
+      toImport.push(new File([blob],neu[i].name||("drive-"+neu[i].id),{type:neu[i].mimeType||blob.type}));
+      okIds.push(neu[i].id);
+    }catch(e){}
+  }
+  if(!toImport.length){toast("Die Dateien konnten nicht geladen werden.",true);return;}
+  addGdriveImported(okIds);
+  processFiles(toImport);
+}
+function gdriveCard(){
+  var cid=gdriveClientId(),folder=gdriveFolderId(),imported=gdriveImportedSet().length;
+  return '<section class="card"><h2 class="sect">🗂️ Google Drive verbinden</h2>'+
+    '<p class="muted" style="font-size:.9rem">Verbinde einen Google-Drive-Ordner (z. B. mit deinen Scans). Der Butler holt die PDFs und Bilder daraus, liest sie aus und sortiert sie automatisch ein. Am besten am Laptop im Browser.</p>'+
+    '<label class="f">Google Client-ID</label><input type="text" id="gd_client" value="'+escapeHtml(cid)+'" placeholder="…apps.googleusercontent.com">'+
+    '<label class="f">Drive-Ordner (Link oder ID)</label><input type="text" id="gd_folder" value="'+escapeHtml(folder)+'" placeholder="https://drive.google.com/drive/folders/…">'+
+    '<div class="btnrow"><button class="ghost" data-action="gd-save">Speichern</button>'+((cid&&folder)?'<button class="primary" data-action="gd-import">🔄 Dokumente importieren</button>':"")+'</div>'+
+    (imported?'<p class="muted" style="font-size:.8rem;margin-top:8px">Bereits importiert: '+imported+' Datei(en). Ein erneuter Import holt nur neue Dateien.</p>':"")+
+    '<details style="margin-top:12px"><summary style="cursor:pointer;color:var(--accent);font-weight:600;font-size:.9rem">So bekommst du die Client-ID (einmalig, ~5 Min.)</summary>'+
+      '<ol class="hint" style="padding-left:20px;line-height:1.7">'+
+      '<li><a href="https://console.cloud.google.com/" target="_blank">Google Cloud Console</a> öffnen → neues Projekt anlegen.</li>'+
+      '<li>„APIs &amp; Dienste" → „Bibliothek" → <b>Google Drive API</b> aktivieren.</li>'+
+      '<li>„OAuth-Zustimmungsbildschirm" einrichten (Nutzertyp „Extern", deine Google-Adresse als Testnutzer hinzufügen).</li>'+
+      '<li>„Anmeldedaten" → „Anmeldedaten erstellen" → „OAuth-Client-ID" → Typ <b>Web</b>. Unter „Autorisierte JavaScript-Quellen" <b>https://slizex.github.io</b> eintragen.</li>'+
+      '<li>Die erzeugte Client-ID oben einfügen, speichern, „Dokumente importieren" tippen und den Google-Login bestätigen.</li>'+
+      '</ol></details>'+
+  '</section>';
+}
+
 /* ---------- Events ---------- */
 function onAppClick(e){
   var nav=e.target.closest("[data-nav]");
@@ -2025,6 +2115,8 @@ function onAppClick(e){
   else if(act==="export-json")exportJSON();
   else if(act==="pin-set"||act==="pin-change")showLock("set");
   else if(act==="pin-remove"){if(confirm("PIN wirklich entfernen? Die App ist dann ohne Sperre zugänglich.")){removePin();renderApp();toast("PIN entfernt");}}
+  else if(act==="gd-save")saveGdriveConfig();
+  else if(act==="gd-import")gdriveImport();
   else if(act==="logout")doLogout();
 }
 function docLinkUI(docId){
