@@ -11,6 +11,7 @@
     "@capacitor/cli": "^6.1.2"
   },
   "dependencies": {
+    "@aparajita/capacitor-biometric-auth": "^7.1.5",
     "@capacitor/android": "^6.1.2",
     "@capacitor/app": "^6.0.2",
     "@capacitor/camera": "^6.1.2",

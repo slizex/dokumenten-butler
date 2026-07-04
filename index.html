@@ -236,6 +236,23 @@ body.dark .badge.fach{color:#67e8f9}
 .authforgot{text-align:center;margin-top:14px;font-size:.85rem}
 body.app-hidden .shell{display:none}
 
+/* ---- App-Sperre (nur native App) ---- */
+.lockscreen{position:fixed;inset:0;z-index:300;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px 20px;gap:6px}
+.lockscreen[hidden]{display:none}
+.locklogo{width:56px;height:56px;border-radius:15px;background:linear-gradient(140deg,#1d4ed8,#172554);display:grid;place-items:center;font-size:1.7rem;margin-bottom:6px}
+.locktitle{font-size:1.15rem;font-weight:650}
+.locksub{color:var(--muted);font-size:.9rem;margin-bottom:12px;text-align:center;min-height:20px}
+.lockdots{display:flex;gap:14px;margin:8px 0 20px}
+.lockdot{width:15px;height:15px;border-radius:50%;border:2px solid var(--border2);background:transparent;transition:background .1s}
+.lockdot.on{background:var(--accent);border-color:var(--accent)}
+.lockdots.err .lockdot{border-color:var(--neg);animation:lshake .3s}
+@keyframes lshake{0%,100%{transform:translateX(0)}25%{transform:translateX(-6px)}75%{transform:translateX(6px)}}
+.keypad{display:grid;grid-template-columns:repeat(3,72px);gap:14px;justify-content:center}
+.keybtn{width:72px;height:72px;border-radius:50%;border:1px solid var(--border);background:var(--panel);color:var(--fg);font-size:1.5rem;font-weight:500;cursor:pointer;display:grid;place-items:center}
+.keybtn:active{background:var(--panel2)}
+.keybtn.wide{font-size:1rem}
+.lockbio{margin-top:18px;background:none;border:none;color:var(--accent);font:inherit;font-weight:600;font-size:.95rem;cursor:pointer;display:flex;align-items:center;gap:8px}
+
 /* ---- Toast ---- */
 #toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);background:#26262b;color:#fff;padding:13px 20px;border-radius:10px;font-size:.9rem;font-weight:500;opacity:0;pointer-events:none;transition:all .22s;z-index:200;box-shadow:var(--shadow-lg);max-width:min(480px,90vw);min-height:24px}
 #toast.show{opacity:1;transform:translate(-50%,0)}
@@ -278,6 +295,15 @@ body.app-hidden .shell{display:none}
       <div class="authbtns"><button class="primary" id="auth_setpass">Passwort speichern</button></div>
     </div>
   </div>
+</div>
+
+<div id="lockscreen" class="lockscreen" hidden>
+  <div class="locklogo">🎩</div>
+  <div class="locktitle" id="lockTitle">App entsperren</div>
+  <div class="locksub" id="lockSub">Bitte gib deine PIN ein.</div>
+  <div class="lockdots" id="lockDots"></div>
+  <div class="keypad" id="lockKeypad"></div>
+  <button class="lockbio" id="lockBioBtn" hidden>🔓 Mit Fingerabdruck entsperren</button>
 </div>
 
 <div class="shell">
@@ -1562,6 +1588,7 @@ function viewSettings(){
     '<p class="muted" style="font-size:.9rem">Speicher belegt: <b>'+mb+'</b> ('+DOCS.length+(DOCS.length===1?" Dokument":" Dokumente")+')</p>'+
     '<div class="btnrow"><button class="ghost" data-action="export-json">⬇️ Vertragsdaten exportieren (JSON)</button></div>'+
   '</section>'+
+  securityCard()+
   '<section class="card"><h2 class="sect">ℹ️ Wie rechnet der Butler?</h2>'+
     '<p class="muted" style="font-size:.9rem">Kündbar zum = Vertragsbeginn + Mindestlaufzeit. Letzter Kündigungstag = dieses Datum minus Kündigungsfrist. 🔴 = weniger als 30 Tage, 🟡 = weniger als 90 Tage. Für Verträge ab dem 1. März 2022 gilt das Gesetz für faire Verbraucherverträge: Nach der Mindestlaufzeit sind sie jederzeit mit höchstens 1 Monat Frist kündbar – der Butler berücksichtigt das automatisch.</p>'+
   '</section>'+
@@ -1775,11 +1802,100 @@ function nativeInit(){
   var App=capPlugin("App");
   if(App&&App.addListener){
     try{App.addListener("backButton",function(){
+      if(!$("#lockscreen").hidden)return;
       if(document.body.classList.contains("app-hidden"))return;
       if(activeView!=="dashboard"){reviewDoc=null;go("dashboard");}
       else if(App.exitApp){App.exitApp();}
     });}catch(e){}
+    try{App.addListener("appStateChange",function(st){if(st&&st.isActive&&pinSet()&&$("#lockscreen").hidden)showLock("verify");});}catch(e){}
   }
+  if(pinSet())showLock("verify");
+}
+
+/* ---------- App-Sperre (PIN + Biometrie) – nur native App ---------- */
+var PIN_LEN=4;
+var lockMode="verify",lockBuf="",lockFirst="";
+function pinStored(){try{return JSON.parse(localStorage.getItem("db_pin")||"null");}catch(e){return null;}}
+function pinSet(){return !!pinStored();}
+function bioEnabled(){try{return localStorage.getItem("db_bio")==="1";}catch(e){return false;}}
+async function sha256hex(s){
+  try{var buf=await crypto.subtle.digest("SHA-256",new TextEncoder().encode(s));return Array.prototype.map.call(new Uint8Array(buf),function(b){return b.toString(16).padStart(2,"0");}).join("");}
+  catch(e){var h=0;for(var i=0;i<s.length;i++){h=(h*31+s.charCodeAt(i))>>>0;}return "f"+h.toString(16);}
+}
+async function savePin(pin){var salt=Math.random().toString(36).slice(2)+Date.now();localStorage.setItem("db_pin",JSON.stringify({salt:salt,hash:await sha256hex(salt+"|"+pin)}));}
+async function checkPinVal(pin){var st=pinStored();if(!st)return false;return (await sha256hex(st.salt+"|"+pin))===st.hash;}
+function removePin(){try{localStorage.removeItem("db_pin");localStorage.removeItem("db_bio");}catch(e){}}
+function lockRenderDots(){var el=$("#lockDots");if(!el)return;var h="";for(var i=0;i<PIN_LEN;i++)h+='<span class="lockdot'+(i<lockBuf.length?" on":"")+'"></span>';el.innerHTML=h;el.classList.remove("err");}
+function lockBuildKeypad(){
+  var el=$("#lockKeypad");if(!el)return;
+  var h=["1","2","3","4","5","6","7","8","9"].map(function(k){return '<button class="keybtn" data-key="'+k+'">'+k+'</button>';}).join("");
+  h+='<button class="keybtn wide" data-key="C">'+(lockMode==="verify"?"":"Abbr.")+'</button>';
+  h+='<button class="keybtn" data-key="0">0</button>';
+  h+='<button class="keybtn wide" data-key="B">⌫</button>';
+  el.innerHTML=h;
+}
+function showLock(mode){
+  lockMode=mode||"verify";lockBuf="";lockFirst="";
+  var ls=$("#lockscreen");if(ls)ls.hidden=false;
+  $("#lockTitle").textContent=lockMode==="verify"?"App entsperren":(lockMode==="set"?"Neue PIN festlegen":"PIN bestätigen");
+  $("#lockSub").textContent=lockMode==="verify"?"Bitte gib deine PIN ein.":(lockMode==="set"?"Wähle eine 4-stellige PIN.":"Gib die PIN erneut ein.");
+  lockBuildKeypad();lockRenderDots();
+  var bio=$("#lockBioBtn");if(bio)bio.hidden=!(lockMode==="verify"&&bioEnabled());
+  if(lockMode==="verify"&&bioEnabled())tryBiometric();
+}
+function hideLock(){var ls=$("#lockscreen");if(ls)ls.hidden=true;}
+function lockError(msg){var d=$("#lockDots");if(d)d.classList.add("err");var s=$("#lockSub");if(s)s.textContent=msg;lockBuf="";setTimeout(lockRenderDots,340);}
+async function lockKey(k){
+  if(k==="B"){lockBuf=lockBuf.slice(0,-1);lockRenderDots();return;}
+  if(k==="C"){if(lockMode!=="verify")hideLock();return;}
+  if(lockBuf.length>=PIN_LEN)return;
+  lockBuf+=k;lockRenderDots();
+  if(lockBuf.length<PIN_LEN)return;
+  var entered=lockBuf;
+  if(lockMode==="verify"){
+    if(await checkPinVal(entered))hideLock();else lockError("Falsche PIN. Bitte erneut.");
+  }else if(lockMode==="set"){
+    lockFirst=entered;lockBuf="";lockMode="confirm";$("#lockTitle").textContent="PIN bestätigen";$("#lockSub").textContent="Gib die PIN erneut ein.";lockRenderDots();
+  }else{
+    if(entered===lockFirst){await savePin(entered);hideLock();toast("PIN gespeichert 🔒");if(activeView==="settings")renderApp();maybeOfferBiometric();}
+    else{lockMode="set";lockFirst="";lockError("PINs stimmen nicht überein.");}
+  }
+}
+function bioPlugin(){return capPlugin("BiometricAuth")||capPlugin("NativeBiometric");}
+async function bioAvailable(){
+  var B=bioPlugin();if(!B)return false;
+  try{
+    if(B.checkBiometry){var r=await B.checkBiometry();return !!(r&&(r.isAvailable||r.biometryType));}
+    if(B.isAvailable){var r2=await B.isAvailable();return !!(r2&&r2.isAvailable);}
+  }catch(e){}
+  return false;
+}
+async function tryBiometric(){
+  var B=bioPlugin();if(!B)return;
+  try{
+    if(B.authenticate){await B.authenticate({reason:"Dokumenten-Butler entsperren",cancelTitle:"PIN verwenden",androidTitle:"Entsperren",androidSubtitle:"Fingerabdruck oder Gesicht"});hideLock();return;}
+    if(B.verifyIdentity){await B.verifyIdentity({reason:"Dokumenten-Butler entsperren",title:"Entsperren"});hideLock();return;}
+  }catch(e){}
+}
+async function maybeOfferBiometric(){
+  if(bioEnabled())return;
+  if(await bioAvailable()){try{if(confirm("Möchtest du zusätzlich per Fingerabdruck/Gesicht entsperren?"))localStorage.setItem("db_bio","1");}catch(e){}}
+}
+async function toggleBiometric(on){
+  if(on){if(!(await bioAvailable())){toast("Auf diesem Gerät ist kein Fingerabdruck/Gesicht eingerichtet.",true);if(activeView==="settings")renderApp();return;}try{localStorage.setItem("db_bio","1");}catch(e){}toast("Fingerabdruck aktiviert ✅");}
+  else{try{localStorage.removeItem("db_bio");}catch(e){}toast("Fingerabdruck deaktiviert");}
+}
+function securityCard(){
+  if(!isNative())return "";
+  var has=pinSet();
+  return '<section class="card"><h2 class="sect">🔒 App-Sicherheit</h2>'+
+    '<p class="muted" style="font-size:.9rem">Schütze deine Dokumente mit einer PIN'+(has?".":" – empfohlen, da hier medizinische und finanzielle Daten liegen.")+'</p>'+
+    (has?
+      '<div class="btnrow"><button class="ghost" data-action="pin-change">PIN ändern</button><button class="danger" data-action="pin-remove">PIN entfernen</button></div>'+
+      '<label style="display:flex;align-items:center;gap:10px;margin-top:14px;font-size:.95rem;cursor:pointer"><input type="checkbox" id="bioToggle" style="width:auto"'+(bioEnabled()?" checked":"")+'> Mit Fingerabdruck / Gesicht entsperren</label>'
+      :
+      '<div class="btnrow"><button class="primary" data-action="pin-set">🔒 PIN einrichten</button></div>')+
+  '</section>';
 }
 
 /* ---------- Events ---------- */
@@ -1830,6 +1946,8 @@ function onAppClick(e){
   else if(act==="hh-copy")copyInvite(b.dataset.code);
   else if(act==="hh-join")joinUI();
   else if(act==="export-json")exportJSON();
+  else if(act==="pin-set"||act==="pin-change")showLock("set");
+  else if(act==="pin-remove"){if(confirm("PIN wirklich entfernen? Die App ist dann ohne Sperre zugänglich.")){removePin();renderApp();toast("PIN entfernt");}}
   else if(act==="logout")doLogout();
 }
 function docLinkUI(docId){
@@ -1859,6 +1977,7 @@ function onAppChange(e){
   else if(e.target.id==="df_typ"){docFilter.typ=e.target.value;renderApp();}
   else if(e.target.id==="mf_fach"){medFilter.fach=e.target.value;renderApp();}
   else if(e.target.id==="mf_typ"){medFilter.typ=e.target.value;renderApp();}
+  else if(e.target.id==="bioToggle"){toggleBiometric(e.target.checked);}
 }
 function onAppInput(e){
   if(e.target.id&&e.target.id.indexOf("cf_")===0){updateFormPreview();return;}
@@ -1895,6 +2014,8 @@ function init(){
     if(pendingRecovery&&session){enterRecovery(session);return;}
     handleSession(session);
   });
+  var kp=$("#lockKeypad");if(kp)kp.addEventListener("click",function(e){var b=e.target.closest("[data-key]");if(b)lockKey(b.dataset.key);});
+  var bb=$("#lockBioBtn");if(bb)bb.addEventListener("click",tryBiometric);
   if("serviceWorker" in navigator){try{navigator.serviceWorker.register("sw.js");}catch(e){}}
   try{nativeInit();}catch(e){}
 }
