@@ -1703,6 +1703,7 @@ async function enterApp(session){
   try{await loadHouseholds();}catch(e){}
   try{await loadFromDB();}catch(e){toast("Daten konnten nicht geladen werden: "+errMsg(e),true);}
   renderApp();
+  try{scheduleFristNotifications();}catch(e){}
 }
 function handleSession(session){
   if(session&&session.user){
@@ -1721,6 +1722,64 @@ function applyTheme(dark){
   var b=$("#themeBtn");if(b)b.textContent=dark?"☀️":"🌙";
   var tc=document.querySelector('meta[name="theme-color"]');if(tc)tc.setAttribute("content",dark?"#09090b":"#1d4ed8");
   try{localStorage.setItem("dbTheme",dark?"dark":"light");}catch(e){}
+}
+
+/* ---------- Native App (Capacitor) – nur aktiv in der Android-App ---------- */
+var CAP=window.Capacitor;
+function isNative(){try{return !!(CAP&&CAP.isNativePlatform&&CAP.isNativePlatform());}catch(e){return false;}}
+function capPlugin(n){return (CAP&&CAP.Plugins&&CAP.Plugins[n])?CAP.Plugins[n]:null;}
+function hashId(str,off){var h=5381;str=String(str||"");for(var i=0;i<str.length;i++){h=((h<<5)+h+str.charCodeAt(i))|0;}return (Math.abs(h)%1000000)+(off||0)*1000000+100000;}
+function daysBeforeDate(iso,n){var d=new Date(String(iso).slice(0,10)+"T09:00:00");d.setDate(d.getDate()-n);return d;}
+/* Kamera-Scan über die native Kamera (bessere Qualität als Browser-Upload) */
+async function nativeCameraScan(){
+  var Camera=capPlugin("Camera");
+  if(!Camera){var fc=$("#fileCam");if(fc)fc.click();return;}
+  try{
+    var photo=await Camera.getPhoto({quality:82,allowEditing:false,resultType:"base64",source:"CAMERA",saveToGallery:false,correctOrientation:true});
+    if(!photo||!photo.base64String)return;
+    var fmt=(photo.format||"jpeg").toLowerCase();var mime="image/"+(fmt==="jpg"?"jpeg":fmt);
+    var blob=new Blob([base64ToBytes(photo.base64String)],{type:mime});
+    var file=new File([blob],"scan-"+Date.now()+"."+(fmt==="jpeg"?"jpg":fmt),{type:mime});
+    onAddFile(file);
+  }catch(e){var m=String(e&&(e.message||e));if(!/cancel/i.test(m))toast("Kamera-Scan nicht möglich: "+m,true);}
+}
+/* Lokale Erinnerungen 30 und 7 Tage vor dem letzten Kündigungstag planen */
+async function scheduleFristNotifications(){
+  if(!isNative())return;
+  var LN=capPlugin("LocalNotifications");if(!LN)return;
+  try{
+    var perm=await LN.checkPermissions();
+    if(perm.display!=="granted"){perm=await LN.requestPermissions();}
+    if(perm.display!=="granted")return;
+    try{var pend=await LN.getPending();if(pend&&pend.notifications&&pend.notifications.length){await LN.cancel({notifications:pend.notifications.map(function(n){return {id:n.id};})});}}catch(e){}
+    var now=Date.now(),list=[];
+    CONTRACTS.forEach(function(c){
+      if(c.status!=="aktiv")return;
+      var f=fristInfo(c);if(!f.lastDay)return;
+      var name=(c.anbieter||"Vertrag")+(c.produkt?" – "+c.produkt:"");
+      [[30,0],[7,1]].forEach(function(p){
+        var when=daysBeforeDate(f.lastDay,p[0]);
+        if(when.getTime()>now+60000){
+          list.push({id:hashId(c.id,p[1]),title:"⏰ Kündigungsfrist",body:name+": letzter Kündigungstag am "+fmtDate(f.lastDay)+" (in "+p[0]+" Tagen).",schedule:{at:when},smallIcon:"ic_stat_icon"});
+        }
+      });
+    });
+    if(list.length)await LN.schedule({notifications:list});
+  }catch(e){}
+}
+function nativeInit(){
+  if(!isNative())return;
+  document.body.classList.add("native");
+  var SB=capPlugin("StatusBar");if(SB){try{SB.setBackgroundColor({color:"#1d4ed8"});SB.setStyle({style:"LIGHT"});}catch(e){}}
+  var Splash=capPlugin("SplashScreen");if(Splash){try{setTimeout(function(){Splash.hide&&Splash.hide();},300);}catch(e){}}
+  var App=capPlugin("App");
+  if(App&&App.addListener){
+    try{App.addListener("backButton",function(){
+      if(document.body.classList.contains("app-hidden"))return;
+      if(activeView!=="dashboard"){reviewDoc=null;go("dashboard");}
+      else if(App.exitApp){App.exitApp();}
+    });}catch(e){}
+  }
 }
 
 /* ---------- Events ---------- */
@@ -1745,7 +1804,7 @@ function onAppClick(e){
   else if(act==="med-save")onSaveMed();
   else if(act==="med-tovertrag")fromMedical(id);
   else if(act==="review-med-done"){reviewDoc=null;go("gesundheit");toast("Im Gesundheitsbereich abgelegt ✅");}
-  else if(act==="pick-cam"){var fc=$("#fileCam");if(fc)fc.click();}
+  else if(act==="pick-cam"){if(isNative())nativeCameraScan();else{var fc=$("#fileCam");if(fc)fc.click();}}
   else if(act==="pick-file"){var fp=$("#filePick");if(fp)fp.click();}
   else if(act==="review-link"){if(reviewDoc)linkDoc(reviewDoc.id,id).then(function(){reviewDoc=null;detailId=id;activeView="contract-detail";renderApp();});}
   else if(act==="review-new"){
@@ -1837,6 +1896,7 @@ function init(){
     handleSession(session);
   });
   if("serviceWorker" in navigator){try{navigator.serviceWorker.register("sw.js");}catch(e){}}
+  try{nativeInit();}catch(e){}
 }
 document.addEventListener("DOMContentLoaded",init);
 })();

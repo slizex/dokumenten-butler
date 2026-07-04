@@ -1,0 +1,10 @@
+# Gradle-Wrapper und Shell-Skripte müssen LF behalten (Linux-CI-Build)
+androidapp/android/gradlew text eol=lf
+*.sh text eol=lf
+*.mjs text eol=lf
+
+# Binärdateien nicht anfassen
+*.jar binary
+*.png binary
+*.keystore binary
+*.apk binary
