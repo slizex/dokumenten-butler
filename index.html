@@ -1731,6 +1731,7 @@ async function enterApp(session){
   try{await loadFromDB();}catch(e){toast("Daten konnten nicht geladen werden: "+errMsg(e),true);}
   renderApp();
   try{scheduleFristNotifications();}catch(e){}
+  if(pendingSharedFile){var f=pendingSharedFile;pendingSharedFile=null;go("add");onAddFile(f);}
 }
 function handleSession(session){
   if(session&&session.user){
@@ -1770,6 +1771,27 @@ async function nativeCameraScan(){
     onAddFile(file);
   }catch(e){var m=String(e&&(e.message||e));if(!/cancel/i.test(m))toast("Kamera-Scan nicht möglich: "+m,true);}
 }
+/* "An Butler teilen": aus anderer App geteilte Datei empfangen und einlesen */
+var pendingSharedFile=null;
+function shareExt(type){type=(type||"").toLowerCase();if(type.indexOf("pdf")>=0)return ".pdf";if(type.indexOf("png")>=0)return ".png";if(type.indexOf("jpeg")>=0||type.indexOf("jpg")>=0)return ".jpg";if(type.indexOf("rfc822")>=0||type.indexOf("eml")>=0)return ".eml";if(type.indexOf("image")>=0)return ".jpg";return "";}
+async function handleSharedIntent(){
+  var SI=capPlugin("SendIntent");if(!SI||!SI.checkSendIntentReceived)return;
+  var res;try{res=await SI.checkSendIntentReceived();}catch(e){return;}
+  if(!res||!res.url)return;
+  try{
+    var rawUrl=decodeURIComponent(res.url);
+    var fetchUrl=(CAP&&CAP.convertFileSrc)?CAP.convertFileSrc(rawUrl):rawUrl;
+    var resp=await fetch(fetchUrl);
+    var blob=await resp.blob();
+    var type=res.type||blob.type||"application/octet-stream";
+    var base=(res.title||"geteilt").replace(/[^\wäöüÄÖÜß.\-]+/g,"_").slice(0,40)||"geteilt";
+    var name=/\.[a-z0-9]{2,4}$/i.test(base)?base:base+shareExt(type);
+    var file=new File([blob],name,{type:type});
+    try{SI.finish&&SI.finish();}catch(e){}
+    if(currentUser&&activeHousehold){go("add");onAddFile(file);}
+    else{pendingSharedFile=file;}
+  }catch(e){toast("Geteilte Datei konnte nicht gelesen werden: "+errMsg(e),true);}
+}
 /* Lokale Erinnerungen 30 und 7 Tage vor dem letzten Kündigungstag planen */
 async function scheduleFristNotifications(){
   if(!isNative())return;
@@ -1807,9 +1829,10 @@ function nativeInit(){
       if(activeView!=="dashboard"){reviewDoc=null;go("dashboard");}
       else if(App.exitApp){App.exitApp();}
     });}catch(e){}
-    try{App.addListener("appStateChange",function(st){if(st&&st.isActive&&pinSet()&&$("#lockscreen").hidden)showLock("verify");});}catch(e){}
+    try{App.addListener("appStateChange",function(st){if(st&&st.isActive){if(pinSet()&&$("#lockscreen").hidden)showLock("verify");handleSharedIntent();}});}catch(e){}
   }
   if(pinSet())showLock("verify");
+  handleSharedIntent();
 }
 
 /* ---------- App-Sperre (PIN + Biometrie) – nur native App ---------- */
