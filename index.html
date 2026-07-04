@@ -1617,6 +1617,8 @@ function viewSettings(){
   if(!bytes)mb="0 KB";
   return '<section class="card"><h2 class="sect">👤 Konto</h2>'+
     '<p>Angemeldet als <b>'+email+'</b></p>'+
+    '<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--accent);font-weight:600;font-size:.9rem">🔑 Passwort ändern</summary>'+
+      '<div style="margin-top:8px"><input type="password" id="acc_newpass" autocomplete="new-password" placeholder="Neues Passwort (mind. 6 Zeichen)"><div class="btnrow"><button class="ghost" data-action="acc-change-pass">Passwort speichern</button></div></div></details>'+
     '<div class="acclabel accsep">'+(HOUSEHOLDS.length>1?"Deine Haushalte":"Dein Haushalt")+'</div>'+
     '<div class="hhlist">'+opts+'</div>'+
     '<p class="muted" id="hhMeta" style="font-size:.85rem;margin-top:8px"></p>'+
@@ -1672,10 +1674,10 @@ async function doSignup(){
   if(pass.length<6){authMsg("Das Passwort muss mindestens 6 Zeichen haben.","err");return;}
   authMsg("Konto wird erstellt …","");
   try{
-    var r=await sb.auth.signUp({email:email,password:pass});
+    var r=await sb.auth.signUp({email:email,password:pass,options:{emailRedirectTo:location.origin+location.pathname}});
     if(r.error){authMsg(loginErrorText(r.error),"err");return;}
     if(r.data&&r.data.session)authMsg("Konto erstellt – du wirst angemeldet …","ok");
-    else authMsg("Konto erstellt. Bitte bestätige die E-Mail, die wir dir geschickt haben, und melde dich anschließend an.","ok");
+    else authMsg("Fast fertig! Wir haben dir eine Bestätigungs-E-Mail geschickt. Bitte klicke den Link darin an (auch im Spam-Ordner schauen) und melde dich danach hier mit E-Mail und Passwort an.","ok");
   }catch(e){authMsg(loginErrorText(e),"err");}
 }
 async function doLogout(){try{await sb.auth.signOut();}catch(e){}authMsg("",null);var p=$("#auth_pass");if(p)p.value="";}
@@ -1703,6 +1705,7 @@ async function doSetPassword(){
     var r=await sb.auth.updateUser({password:p});
     if(r.error){authMsg(loginErrorText(r.error),"err");return;}
     pendingRecovery=false;showResetMode(false);
+    try{history.replaceState(null,"",location.pathname+location.search);}catch(e){}
     authMsg("Passwort geändert ✅ Du wirst angemeldet …","ok");
     var s=await sb.auth.getSession();
     if(s&&s.data&&s.data.session)handleSession(s.data.session);
@@ -1713,6 +1716,13 @@ function enterRecovery(session){
   showAuth(true);showResetMode(true);
   var p=$("#auth_newpass");if(p)p.value="";
   authMsg("Du kannst jetzt ein neues Passwort vergeben.","ok");
+}
+/* Passwort ändern für bereits eingeloggte Nutzer (aus den Einstellungen) */
+async function changeAccountPassword(){
+  var inp=$("#acc_newpass"),p=inp?(inp.value||""):"";
+  if(p.length<6){toast("Das Passwort muss mindestens 6 Zeichen haben.",true);if(inp)inp.focus();return;}
+  try{var r=await sb.auth.updateUser({password:p});if(r.error)throw r.error;if(inp)inp.value="";toast("Passwort geändert ✅");}
+  catch(e){toast("Passwort ändern fehlgeschlagen: "+errMsg(e),true);}
 }
 
 /* ---------- Haushalte (geteilt mit Verbrauchs-Tracker) ---------- */
@@ -2117,6 +2127,7 @@ function onAppClick(e){
   else if(act==="pin-remove"){if(confirm("PIN wirklich entfernen? Die App ist dann ohne Sperre zugänglich.")){removePin();renderApp();toast("PIN entfernt");}}
   else if(act==="gd-save")saveGdriveConfig();
   else if(act==="gd-import")gdriveImport();
+  else if(act==="acc-change-pass")changeAccountPassword();
   else if(act==="logout")doLogout();
 }
 function docLinkUI(docId){
