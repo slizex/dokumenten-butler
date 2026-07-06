@@ -12,6 +12,9 @@ on:
       - '.github/workflows/android.yml'
   workflow_dispatch:
 
+permissions:
+  contents: write
+
 jobs:
   build:
     runs-on: ubuntu-latest
@@ -60,3 +63,10 @@ jobs:
           name: dokumenten-butler-apk
           path: androidapp/dokumenten-butler-debug.apk
           if-no-files-found: error
+
+      - name: Update release APK (v1.0.0)
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cp dokumenten-butler-debug.apk dokumenten-butler.apk
+          gh release upload v1.0.0 dokumenten-butler.apk --clobber -R ${{ github.repository }}
