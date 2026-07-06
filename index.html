@@ -164,6 +164,7 @@ textarea{min-height:74px;resize:vertical}
 .dmeta{font-size:.78rem;color:var(--muted2);margin-top:3px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .dact{display:flex;flex-direction:column;gap:6px;flex:none}
 .dact button{font-size:.8rem;padding:6px 10px}
+.rowgo{align-self:center;color:var(--muted2);font-size:1.35rem;padding:0 6px;flex:none}
 .filterbar{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
 .filterbar select,.filterbar input{width:auto;flex:1;min-width:130px}
 
@@ -1039,8 +1040,8 @@ async function reviewCreatePerson(name){
 }
 
 /* ---------- Views ---------- */
-var contractsCostSort=false;
-function go(view){activeView=view;if(view!=="contract-detail")detailId=null;if(view!=="contracts")contractsCostSort=false;renderApp();window.scrollTo({top:0,behavior:"smooth"});}
+var contractsCostSort=false,tipsExpanded=false;
+function go(view){activeView=view;if(view!=="contract-detail")detailId=null;if(view!=="contracts")contractsCostSort=false;tipsExpanded=false;renderApp();window.scrollTo({top:0,behavior:"smooth"});}
 function navItem(v,label,icon){return '<button class="tab'+(v===activeView?" active":"")+'" data-nav="'+v+'"><span class="tcon">'+icon+'</span>'+label+'</button>';}
 function renderTabs(){
   var items=navItem("dashboard","Übersicht","🏠")+navItem("contracts","Verträge","📑")+navItem("gesundheit","Gesundheit","🩺")+navItem("docs","Dokumente","📁")+navItem("add","Hinzufügen","➕");
@@ -1076,7 +1077,10 @@ function viewDashboard(){
     var ob=b.f.days!=null?b.f.days:(b.f.kind==="flex"?99990:99999);
     return oa-ob;
   });
-  var fr=rows.length?rows.map(function(r){return fristRow(r.c,r.f);}).join(""):'<p class="muted">Noch keine Verträge. Lade ein Dokument hoch oder lege einen Vertrag an – der Butler übernimmt den Rest.</p>';
+  /* schlank: nur die 3 dringendsten Fristen, Rest über Verträge-Ansicht */
+  var shownRows=rows.slice(0,3);
+  var fr=shownRows.length?shownRows.map(function(r){return fristRow(r.c,r.f);}).join(""):'<p class="muted">Noch keine Verträge. Lade ein Dokument hoch oder lege einen Vertrag an – der Butler übernimmt den Rest.</p>';
+  if(rows.length>3)fr+='<button class="linkbtn" data-nav="contracts" style="margin-top:10px">Alle '+rows.length+' Verträge ansehen ›</button>';
   var recent=DS.slice(0,3).map(docRow).join("")||'<p class="muted">Noch keine Dokumente im Archiv.</p>';
   var medsDS=DS.filter(isMed),jahrNow=todayISO().slice(0,4);
   var medJahr=medsDS.reduce(function(s,d){var dt=(d.behandlungsdatum||d.doc_date||"");return (d.betrag!=null&&String(dt).slice(0,4)===jahrNow)?s+Number(d.betrag):s;},0);
@@ -1091,9 +1095,8 @@ function viewDashboard(){
     '</div>'+
     butlerTips(CS,DS)+
     '<section class="card"><h2 class="sect">⏰ Fristen im Blick</h2>'+fr+'</section>'+
-    costByPerson()+
-    costBreakdown(CS)+
-    '<section class="card"><h2 class="sect">🕘 Zuletzt hinzugefügt</h2>'+recent+'</section>';
+    '<section class="card"><h2 class="sect">🕘 Zuletzt hinzugefügt</h2>'+recent+
+    (DS.length>3?'<button class="linkbtn" data-nav="docs" style="margin-top:10px">Alle Dokumente ansehen ›</button>':"")+'</section>';
 }
 /* Butler-Tipps: proaktive Hinweise, wo der User etwas tun sollte */
 function butlerTips(CS,DS){
@@ -1125,10 +1128,13 @@ function butlerTips(CS,DS){
     if(noperson&&!activePerson)tips.push({txt:noperson+(noperson===1?" Dokument ist":" Dokumente sind")+" noch keiner Person zugeordnet – ordne sie zu, um klar zu trennen, wem was gehört.",btn:"Ansehen",nav:"docs"});
   }
   if(!tips.length)return "";
-  return '<section class="card"><h2 class="sect">🎩 Butler-Tipps</h2>'+tips.map(function(t){
+  /* schlank: max. 2 Tipps zeigen, Rest auf Klick */
+  var shown=tipsExpanded?tips:tips.slice(0,2);
+  var more=(!tipsExpanded&&tips.length>2)?'<button class="linkbtn" data-action="tips-more" style="margin-top:10px">'+(tips.length-2)+' weitere Tipps anzeigen ›</button>':"";
+  return '<section class="card"><h2 class="sect">🎩 Butler-Tipps</h2>'+shown.map(function(t){
     var b=t.nav?'<button class="ghost" data-nav="'+t.nav+'">'+t.btn+'</button>':'<button class="ghost" data-action="'+t.action+'" data-id="'+t.id+'">'+t.btn+'</button>';
     return '<div class="tiprow"><span>'+t.txt+'</span>'+b+'</div>';
-  }).join("")+'</section>';
+  }).join("")+more+'</section>';
 }
 /* Monatskosten nach Kategorie (nur wenn mindestens 2 Kategorien Kosten haben) */
 function costBreakdown(CS){
@@ -1201,7 +1207,9 @@ function viewContracts(){
   }).join("");
   var body=cards?('<div class="clist">'+cards+'</div>'):'<section class="card"><p class="muted">Keine Verträge für diese Person.</p></section>';
   var costBanner=contractsCostSort?('<div class="ainote" style="margin:0 0 12px">💶 Nach monatlichen Kosten sortiert (teuerste zuerst). <button class="linkbtn" data-nav="contracts" style="display:inline">Normale Ansicht</button></div>'):"";
-  return personBar()+costBanner+'<div class="btnrow" style="margin:0 0 16px"><button class="primary" data-nav="add">➕ Per Dokument</button><button class="ghost" data-action="new-contract">Von Hand anlegen</button></div>'+body;
+  /* Kosten-Aufschlüsselungen leben im Kosten-Drilldown (Dashboard bleibt schlank) */
+  var costCards=contractsCostSort?(costByPerson()+costBreakdown(base)):"";
+  return personBar()+costBanner+costCards+'<div class="btnrow" style="margin:0 0 16px"><button class="primary" data-nav="add">➕ Per Dokument</button><button class="ghost" data-action="new-contract">Von Hand anlegen</button></div>'+body;
 }
 function viewContractDetail(){
   var c=contractById(detailId);
@@ -1211,21 +1219,25 @@ function viewContractDetail(){
     ?'<span class="badge law">⚖️ Neues Recht: nach der Mindestlaufzeit monatlich kündbar (max. 1 Monat Frist)</span>':"";
   var mk=monatskosten(c);
   var personVal=c.person_id?(personBadge(c.person_id)+' <button class="linkbtn" data-action="change-person" data-id="'+c.id+'" style="display:inline;margin-left:8px;font-size:.82rem">ändern</button>'):(PERSONS.length?'<button class="linkbtn" data-action="change-person" data-id="'+c.id+'" style="display:inline;font-size:.85rem">➕ Person zuordnen</button>':'<span class="muted">–</span>');
+  /* schlank: leere Angaben ausblenden – Bearbeiten zeigt immer alle Felder */
+  var leer=0;
+  function dOpt(label,cond,val){if(!cond){leer++;return "";}return dRow(label,val);}
   var dgrid='<div class="dgrid">'+
     dRow("Kategorie",k.icon+" "+k.label)+
     dRow("Person",personVal)+
     dRow("Anbieter",escapeHtml(c.anbieter||"–"))+
-    dRow("Tarif / Produkt",escapeHtml(c.produkt||"–"))+
-    dRow("Kundennummer",escapeHtml(c.kundennummer||"–"))+
-    dRow("Vertragsnummer",escapeHtml(c.vertragsnummer||"–"))+
-    dRow("Vertragsbeginn",fmtDate(c.vertragsstart))+
-    dRow("Mindestlaufzeit",c.mindestlaufzeit_monate!=null?(c.mindestlaufzeit_monate===0?"keine":c.mindestlaufzeit_monate+" Monate"):"–")+
-    dRow("Kündigungsfrist",fristTxt(c.kuendigungsfrist_monate))+
-    dRow("Verlängerung",c.verlaengerung_monate!=null?(c.verlaengerung_monate<=1?"monatlich":"um "+c.verlaengerung_monate+" Monate"):"–")+
-    dRow("Kosten",c.kosten!=null?fmtEur(c.kosten)+" / "+(INTERVALL_LABEL[c.kosten_intervall]||"?")+(mk?" (= "+fmtEur(mk)+" mtl.)":""):"–")+
+    dOpt("Tarif / Produkt",!!c.produkt,escapeHtml(c.produkt||""))+
+    dOpt("Kundennummer",!!c.kundennummer,escapeHtml(c.kundennummer||""))+
+    dOpt("Vertragsnummer",!!c.vertragsnummer,escapeHtml(c.vertragsnummer||""))+
+    dOpt("Vertragsbeginn",!!c.vertragsstart,fmtDate(c.vertragsstart))+
+    dOpt("Mindestlaufzeit",c.mindestlaufzeit_monate!=null,c.mindestlaufzeit_monate===0?"keine":c.mindestlaufzeit_monate+" Monate")+
+    dOpt("Kündigungsfrist",c.kuendigungsfrist_monate!=null,fristTxt(c.kuendigungsfrist_monate))+
+    dOpt("Verlängerung",c.verlaengerung_monate!=null,c.verlaengerung_monate<=1?"monatlich":"um "+c.verlaengerung_monate+" Monate")+
+    dOpt("Kosten",c.kosten!=null,c.kosten!=null?fmtEur(c.kosten)+" / "+(INTERVALL_LABEL[c.kosten_intervall]||"?")+(mk?" (= "+fmtEur(mk)+" mtl.)":""):"")+
     dRow("Status",c.status==="aktiv"?"✅ aktiv":(c.status==="gekuendigt"?"✂️ gekündigt"+(c.gekuendigt_zum?" zum "+fmtDate(c.gekuendigt_zum):""):"beendet"))+
     (c.notizen?dRow("Notizen",escapeHtml(c.notizen)):"")+
-  '</div>';
+  '</div>'+
+  (leer>0?'<p class="muted" style="font-size:.82rem;margin:2px 0 0">'+leer+' leere Angabe'+(leer===1?"":"n")+' ausgeblendet – über ✏️ Bearbeiten ergänzbar.</p>':"");
   var docs=DOCS.filter(function(d){return d.contract_id===c.id;});
   var docsHtml=docs.length?docs.map(docRow).join(""):'<p class="muted">Noch keine Dokumente zugeordnet.</p>';
   var statusBtn=c.status==="aktiv"
@@ -1438,10 +1450,7 @@ function docRow(d){
     (d.zusammenfassung?'<div class="dsum">'+escapeHtml(d.zusammenfassung)+'</div>':"")+
     '<div class="dmeta">'+(d.person_id?personBadge(d.person_id):"")+'<span>'+t.label+'</span>'+(kat?'<span>'+kat.icon+' '+kat.label+'</span>':"")+'<span>'+fmtDate(d.doc_date||String(d.created_at).slice(0,10))+'</span>'+
     (c?'<span>🔗 '+escapeHtml(c.anbieter||"Vertrag")+'</span>':'<span class="muted">ohne Vertrag</span>')+'</div></div>'+
-    '<div class="dact"><button class="ghost" data-action="doc-view" data-id="'+d.id+'">👁️ Ansehen</button>'+
-    '<button class="ghost" data-action="doc-link" data-id="'+d.id+'">🔗 Zuordnen</button>'+
-    '<button class="ghost" data-action="to-med" data-id="'+d.id+'" title="In den Gesundheitsbereich verschieben">🩺</button>'+
-    '<button class="danger" data-action="doc-del" data-id="'+d.id+'">🗑️</button></div></div>';
+    '<span class="rowgo">›</span></div>';
 }
 /* Zeile für ein medizinisches Dokument */
 function medRow(d){
@@ -1452,9 +1461,7 @@ function medRow(d){
     (beh?'<div class="behnote">'+escapeHtml(beh)+'</div>':(d.zusammenfassung?'<div class="dsum">'+escapeHtml(d.zusammenfassung)+'</div>':""))+
     '<div class="dmeta">'+(d.person_id?personBadge(d.person_id):"")+(fa?'<span class="badge fach">'+fa.icon+' '+fa.label+'</span>':"")+'<span>'+mt.label+'</span>'+
     '<span>'+fmtDate(d.behandlungsdatum||d.doc_date||String(d.created_at).slice(0,10))+'</span>'+(d.betrag!=null?'<span><b>'+fmtEur(d.betrag)+'</b></span>':"")+'</div></div>'+
-    '<div class="dact"><button class="ghost" data-action="doc-view" data-id="'+d.id+'">👁️ Ansehen</button>'+
-    '<button class="ghost" data-action="med-edit" data-id="'+d.id+'">✏️ Bearbeiten</button>'+
-    '<button class="danger" data-action="doc-del" data-id="'+d.id+'">🗑️</button></div></div>';
+    '<span class="rowgo">›</span></div>';
 }
 function viewDocs(){
   var pool=filterPerson(DOCS).filter(function(d){return !isMed(d);});
@@ -1693,7 +1700,9 @@ function viewAdd(){
   var personHint=(activePerson&&personById(activePerson))?'<div class="ainote">👤 Neue Dokumente werden automatisch <b>'+escapeHtml(personById(activePerson).name)+'</b> zugeordnet (aktiver Personen-Filter).</div>':"";
   return review+
   '<section class="card"><h2 class="sect">➕ Dokument hinzufügen</h2>'+
-  '<p class="muted" style="margin-bottom:14px"><b>Einfach hochladen – der Butler sortiert automatisch ein.</b> Du kannst auch mehrere Dateien auf einmal wählen. Er erkennt selbst, worum es geht: Verträge werden angelegt bzw. zugeordnet und bei den Fristen überwacht, Arztrechnungen wandern in den 🩺 Gesundheitsbereich (mit Fachrichtung, Arzt, Betrag), alles Übrige ins Archiv – jeweils mit erkannter Kategorie und Person.</p>'+
+  '<p class="muted" style="margin-bottom:14px">Einfach hochladen – der Butler liest alles aus und sortiert automatisch ein. Mehrere Dateien auf einmal sind kein Problem.</p>'+
+  '<details style="margin:0 0 14px"><summary style="cursor:pointer;color:var(--accent);font-weight:600;font-size:.88rem">Was passiert beim Einlesen?</summary>'+
+  '<p class="muted" style="font-size:.88rem;margin:8px 0 0">Der Butler erkennt selbst, worum es geht: Verträge werden angelegt bzw. zugeordnet und bei den Fristen überwacht, Arztrechnungen wandern in den 🩺 Gesundheitsbereich (mit Fachrichtung, Arzt, Betrag), alles Übrige ins Archiv – jeweils mit erkannter Kategorie und Person. Danach kannst du jede Einordnung anpassen.</p></details>'+
   personHint+
   '<div class="upzone">'+
    '<button class="upbtn" data-action="pick-cam"><span class="uic">📷</span>Brief fotografieren<span class="usub">Kamera öffnet sich direkt</span></button>'+
@@ -1746,9 +1755,9 @@ function viewSettings(){
   modelCard()+
   gdriveCard()+
   securityCard()+
-  '<section class="card"><h2 class="sect">ℹ️ Wie rechnet der Butler?</h2>'+
-    '<p class="muted" style="font-size:.9rem">Kündbar zum = Vertragsbeginn + Mindestlaufzeit. Letzter Kündigungstag = dieses Datum minus Kündigungsfrist. 🔴 = weniger als 30 Tage, 🟡 = weniger als 90 Tage. Für Verträge ab dem 1. März 2022 gilt das Gesetz für faire Verbraucherverträge: Nach der Mindestlaufzeit sind sie jederzeit mit höchstens 1 Monat Frist kündbar – der Butler berücksichtigt das automatisch.</p>'+
-  '</section>'+
+  '<section class="card"><details><summary style="cursor:pointer;font-weight:650;font-size:1rem">ℹ️ Wie rechnet der Butler?</summary>'+
+    '<p class="muted" style="font-size:.9rem;margin:10px 0 0">Kündbar zum = Vertragsbeginn + Mindestlaufzeit. Letzter Kündigungstag = dieses Datum minus Kündigungsfrist. 🔴 = weniger als 30 Tage, 🟡 = weniger als 90 Tage. Für Verträge ab dem 1. März 2022 gilt das Gesetz für faire Verbraucherverträge: Nach der Mindestlaufzeit sind sie jederzeit mit höchstens 1 Monat Frist kündbar – der Butler berücksichtigt das automatisch.</p>'+
+  '</details></section>'+
   '<button class="danger" data-action="logout" style="width:100%;padding:13px">Abmelden</button>';
 }
 function modelCard(){
@@ -2170,11 +2179,16 @@ async function gdriveImport(){
 }
 function gdriveCard(){
   var cid=gdriveClientId(),folder=gdriveFolderId(),imported=gdriveImportedSet().length;
+  var configured=(cid&&folder);
   return '<section class="card"><h2 class="sect">🗂️ Google Drive verbinden</h2>'+
-    '<p class="muted" style="font-size:.9rem">Verbinde einen Google-Drive-Ordner (z. B. mit deinen Scans). Der Butler holt die PDFs und Bilder daraus, liest sie aus und sortiert sie automatisch ein. Am besten am Laptop im Browser.</p>'+
+    (configured
+      ?('<p class="muted" style="font-size:.9rem">Dein Drive-Ordner ist verbunden. Der Butler holt neue PDFs und Bilder daraus und sortiert sie automatisch ein.</p>'+
+        '<div class="btnrow"><button class="primary" data-action="gd-import">🔄 Dokumente importieren</button></div>')
+      :('<p class="muted" style="font-size:.9rem">Verbinde einen Google-Drive-Ordner (z. B. mit deinen Scans). Der Butler holt die PDFs und Bilder daraus und sortiert sie automatisch ein. Am besten am Laptop im Browser.</p>'))+
+    '<details style="margin-top:10px"'+(configured?"":" open")+'><summary style="cursor:pointer;color:var(--accent);font-weight:600;font-size:.9rem">'+(configured?"Verbindung ändern":"Verbindung einrichten")+'</summary>'+
     '<label class="f">Google Client-ID</label><input type="text" id="gd_client" value="'+escapeHtml(cid)+'" placeholder="…apps.googleusercontent.com">'+
     '<label class="f">Drive-Ordner (Link oder ID)</label><input type="text" id="gd_folder" value="'+escapeHtml(folder)+'" placeholder="https://drive.google.com/drive/folders/…">'+
-    '<div class="btnrow"><button class="ghost" data-action="gd-save">Speichern</button>'+((cid&&folder)?'<button class="primary" data-action="gd-import">🔄 Dokumente importieren</button>':"")+'</div>'+
+    '<div class="btnrow"><button class="ghost" data-action="gd-save">Speichern</button></div></details>'+
     (imported?'<p class="muted" style="font-size:.8rem;margin-top:8px">Bereits importiert: '+imported+' Datei(en). Ein erneuter Import holt nur neue Dateien.</p>':"")+
     '<details style="margin-top:12px"><summary style="cursor:pointer;color:var(--accent);font-weight:600;font-size:.9rem">So bekommst du die Client-ID (einmalig, ~5 Min.)</summary>'+
       '<ol class="hint" style="padding-left:20px;line-height:1.7">'+
@@ -2229,6 +2243,7 @@ function openDocDetail(id){
     '<button class="ghost" data-action="doc-edit" data-id="'+d.id+'">✏️ Bearbeiten</button>'+
     '<button class="ghost" data-action="doc-link" data-id="'+d.id+'">🔗 Zuordnen</button>'+
     (c?'<button class="ghost" data-action="open-contract" data-id="'+c.id+'">📑 Zum Vertrag</button>':"")+
+    '<button class="ghost" data-action="to-med" data-id="'+d.id+'" title="In den Gesundheitsbereich verschieben">🩺</button>'+
     '<button class="danger" data-action="doc-del" data-id="'+d.id+'">🗑️</button>'+
     '<button class="ghost" data-action="modal-close">Schließen</button></div>');
 }
@@ -2362,7 +2377,8 @@ function onAppClick(e){
   }
   else if(act==="mq-ok"){var mqv=$("#mq_input")?$("#mq_input").value:"";var mqcb=modalCb;modalCb=null;closeModal();if(mqcb)mqcb(mqv);}
   else if(act==="modal-close")closeModal();
-  else if(act==="to-med")toMedical(id);
+  else if(act==="to-med"){closeModal();toMedical(id);}
+  else if(act==="tips-more"){tipsExpanded=true;renderApp();}
   else if(act==="med-edit"){medEditId=id;if(reviewDoc&&reviewDoc.id===id)reviewDoc=null;activeView="med-form";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
   else if(act==="med-save")onSaveMed();
   else if(act==="med-tovertrag")fromMedical(id);
