@@ -3,7 +3,7 @@
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=5">
-<meta name="theme-color" content="#1d4ed8">
+<meta name="theme-color" content="#2563eb">
 <title>Dokumenten-Butler</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -15,29 +15,31 @@
 <meta name="apple-mobile-web-app-title" content="Butler">
 <link rel="apple-touch-icon" href="icon-192.png">
 <style>
-/* ===== Dokumenten-Butler — Clean / Minimal (Inter, Sidebar-Dashboard) ===== */
+/* ===== Dokumenten-Butler — Modern / Aurora (Inter, Sidebar + globale Suche) ===== */
 *{box-sizing:border-box}
 [hidden]{display:none!important}
 :root{
- --bg:#fafafa;--panel:#ffffff;--panel2:#f4f4f5;
- --fg:#09090b;--muted:#71717a;--muted2:#a1a1aa;
- --border:#e7e7ea;--border2:#d4d4d8;
- --accent:#1d4ed8;--accent-fg:#ffffff;--gold:#b45309;
+ --bg:#f4f6fb;--panel:#ffffff;--panel2:#edf0f8;
+ --fg:#0d1220;--muted:#5c6478;--muted2:#98a0b3;
+ --border:#e3e7f0;--border2:#cbd3e4;
+ --accent:#2563eb;--accent2:#7c3aed;--accent-fg:#ffffff;--gold:#b45309;
+ --grad:linear-gradient(135deg,#2563eb,#7c3aed);
  --pos:#16a34a;--warn:#d97706;--neg:#dc2626;
- --radius:12px;--radius-sm:8px;
- --shadow-sm:0 1px 2px rgba(9,9,11,.05);
- --shadow:0 1px 3px rgba(9,9,11,.09),0 1px 2px rgba(9,9,11,.04);
- --shadow-lg:0 12px 34px -14px rgba(9,9,11,.30);
+ --radius:16px;--radius-sm:10px;
+ --shadow-sm:0 1px 2px rgba(13,18,32,.05);
+ --shadow:0 2px 10px -2px rgba(13,18,32,.08),0 1px 2px rgba(13,18,32,.04);
+ --shadow-lg:0 18px 44px -16px rgba(13,18,32,.32);
  --sidebar-w:248px;
 }
 body.dark{
- --bg:#09090b;--panel:#131316;--panel2:#1d1d20;
- --fg:#fafafa;--muted:#a1a1aa;--muted2:#71717a;
- --border:#27272a;--border2:#3f3f46;
- --accent:#60a5fa;--gold:#fbbf24;
+ --bg:#0b0e16;--panel:#141827;--panel2:#1d2336;
+ --fg:#f2f4fa;--muted:#9aa3ba;--muted2:#6b7490;
+ --border:#242b40;--border2:#3a4360;
+ --accent:#7d9bff;--accent2:#b18bff;--gold:#fbbf24;
+ --grad:linear-gradient(135deg,#3b6cf0,#8a5cf5);
  --shadow-sm:0 1px 2px rgba(0,0,0,.4);
- --shadow:0 1px 3px rgba(0,0,0,.5);
- --shadow-lg:0 14px 36px -14px rgba(0,0,0,.7);
+ --shadow:0 2px 10px rgba(0,0,0,.45);
+ --shadow-lg:0 18px 44px -16px rgba(0,0,0,.75);
 }
 html{-webkit-text-size-adjust:100%}
 body{margin:0;font-family:Inter,system-ui,-apple-system,"Segoe UI",Roboto,Arial,sans-serif;background:var(--bg);color:var(--fg);font-size:15px;line-height:1.5;-webkit-font-smoothing:antialiased}
@@ -50,34 +52,48 @@ a{color:var(--accent);text-decoration:none}
 .shell{display:grid;grid-template-columns:var(--sidebar-w) 1fr;min-height:100vh}
 .sidebar{position:sticky;top:0;height:100vh;background:var(--panel);border-right:1px solid var(--border);display:flex;flex-direction:column;padding:18px 14px;gap:4px;overflow-y:auto}
 .brand{display:flex;align-items:center;gap:11px;padding:4px 8px 18px;font-weight:700;font-size:1.05rem;letter-spacing:-.02em}
-.blogo{width:32px;height:32px;border-radius:9px;background:linear-gradient(140deg,var(--accent),color-mix(in srgb,var(--accent) 45%,#000));display:grid;place-items:center;color:#fff;flex:none;font-size:1.05rem}
+.blogo{width:34px;height:34px;border-radius:10px;background:var(--grad);display:grid;place-items:center;color:#fff;flex:none;font-size:1.1rem;box-shadow:0 4px 12px -4px color-mix(in srgb,var(--accent) 60%,transparent)}
 .nav{display:flex;flex-direction:column;gap:2px}
-.tab{display:flex;align-items:center;gap:11px;padding:9px 10px;border-radius:8px;border:none;background:none;color:var(--muted);font:inherit;font-weight:500;font-size:.92rem;cursor:pointer;text-align:left;width:100%;transition:background .12s,color .12s}
+.tab{display:flex;align-items:center;gap:11px;padding:10px 11px;border-radius:10px;border:none;background:none;color:var(--muted);font:inherit;font-weight:500;font-size:.92rem;cursor:pointer;text-align:left;width:100%;transition:background .12s,color .12s}
 .tab .tcon{width:18px;height:18px;flex:none;display:grid;place-items:center;font-size:1rem}
 .tab:hover{background:var(--panel2);color:var(--fg)}
-.tab.active{background:color-mix(in srgb,var(--accent) 13%,transparent);color:var(--accent);font-weight:600}
+.tab.active{background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);font-weight:600}
 .sidebar-foot{margin-top:auto;display:flex;flex-direction:column;gap:2px;padding-top:12px;border-top:1px solid var(--border)}
 .content{min-width:0;display:flex;flex-direction:column}
-.topbar2{height:58px;flex:none;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:0 24px;border-bottom:1px solid var(--border);position:sticky;top:0;background:color-mix(in srgb,var(--bg) 80%,transparent);backdrop-filter:blur(10px);-webkit-backdrop-filter:blur(10px);z-index:20}
-.pagetitle{font-size:1.02rem;font-weight:650;letter-spacing:-.01em;display:flex;align-items:center;gap:9px}
-.topactions{display:flex;align-items:center;gap:10px}
+.topbar2{height:62px;flex:none;display:flex;align-items:center;gap:12px;padding:0 24px;border-bottom:1px solid var(--border);position:sticky;top:0;background:color-mix(in srgb,var(--bg) 78%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);z-index:20}
+.pagetitle{font-size:1.02rem;font-weight:650;letter-spacing:-.01em;display:flex;align-items:center;gap:9px;flex:none;white-space:nowrap}
+.topactions{display:flex;align-items:center;gap:10px;flex:none}
+/* globale Suche */
+.gsearch{position:relative;flex:1;min-width:0;max-width:460px;margin-left:auto}
+.gsearch input{width:100%;padding:9px 14px 9px 38px;border:1px solid var(--border);border-radius:99px;background:var(--panel);color:var(--fg);font:inherit;font-size:.9rem;box-shadow:var(--shadow-sm)}
+.gsearch input:focus{outline:2px solid color-mix(in srgb,var(--accent) 40%,transparent);outline-offset:1px;border-color:var(--accent)}
+.gsico{position:absolute;left:13px;top:50%;transform:translateY(-50%);font-size:.9rem;pointer-events:none;opacity:.7}
+.gresults{position:absolute;top:calc(100% + 8px);left:0;right:0;background:var(--panel);border:1px solid var(--border);border-radius:14px;box-shadow:var(--shadow-lg);max-height:min(480px,65vh);overflow-y:auto;z-index:60;padding:6px}
+.grhead{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.06em;color:var(--muted2);padding:8px 10px 3px}
+.grow{display:flex;align-items:center;gap:11px;width:100%;padding:9px 10px;border:none;border-radius:10px;background:none;color:var(--fg);font:inherit;cursor:pointer;text-align:left}
+.grow:hover,.grow.sel{background:var(--panel2)}
+.grow .gric{width:32px;height:32px;border-radius:9px;background:var(--panel2);display:grid;place-items:center;font-size:1rem;flex:none}
+.grow .grt{font-weight:600;font-size:.9rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grow .grs{font-size:.78rem;color:var(--muted);white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.grow>div{min-width:0;flex:1}
+.grempty{padding:14px 12px;color:var(--muted);font-size:.88rem}
 main{padding:26px 24px 90px;width:100%;max-width:1060px;margin:0 auto}
 .iconchip{display:inline-flex;align-items:center;justify-content:center;gap:7px;height:36px;min-width:36px;padding:0 11px;border:1px solid var(--border);border-radius:8px;background:var(--panel);color:var(--fg);cursor:pointer;font:inherit;font-weight:500;font-size:.85rem}
 .iconchip:hover{background:var(--panel2)}
 .bottomnav{display:none}
 
 /* ---- Cards ---- */
-.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin:0 0 16px;box-shadow:var(--shadow-sm)}
+.card{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:20px;margin:0 0 16px;box-shadow:var(--shadow)}
 .sect{font-size:1rem;margin-bottom:12px;display:flex;align-items:center;gap:8px}
 .grid2{display:grid;grid-template-columns:1fr 1fr;gap:16px}
 @media(max-width:760px){.grid2{grid-template-columns:1fr}}
 
 /* ---- Buttons / Forms ---- */
-button.primary{background:var(--accent);color:var(--accent-fg);border:none;border-radius:9px;padding:11px 18px;font:inherit;font-weight:600;cursor:pointer;box-shadow:var(--shadow-sm)}
-button.primary:hover{filter:brightness(1.07)}
-button.ghost{background:var(--panel);border:1px solid var(--border);border-radius:9px;padding:10px 16px;font:inherit;font-weight:500;color:var(--fg);cursor:pointer}
+button.primary{background:var(--grad);color:var(--accent-fg);border:none;border-radius:11px;padding:11px 18px;font:inherit;font-weight:600;cursor:pointer;box-shadow:0 4px 14px -6px color-mix(in srgb,var(--accent) 65%,transparent)}
+button.primary:hover{filter:brightness(1.08)}
+button.ghost{background:var(--panel);border:1px solid var(--border);border-radius:11px;padding:10px 16px;font:inherit;font-weight:500;color:var(--fg);cursor:pointer}
 button.ghost:hover{background:var(--panel2)}
-button.danger{background:none;border:1px solid color-mix(in srgb,var(--neg) 40%,transparent);color:var(--neg);border-radius:9px;padding:9px 14px;font:inherit;font-weight:500;cursor:pointer}
+button.danger{background:none;border:1px solid color-mix(in srgb,var(--neg) 40%,transparent);color:var(--neg);border-radius:11px;padding:9px 14px;font:inherit;font-weight:500;cursor:pointer}
 .linkbtn{background:none;border:none;color:var(--accent);font:inherit;font-weight:500;cursor:pointer;padding:0;display:block}
 label.f{display:block;font-size:.83rem;font-weight:600;color:var(--muted);margin:12px 0 4px}
 input[type=text],input[type=number],input[type=date],input[type=email],input[type=password],select,textarea{width:100%;padding:10px 12px;border:1px solid var(--border2);border-radius:9px;background:var(--panel);color:var(--fg);font:inherit;font-size:.95rem}
@@ -88,9 +104,10 @@ textarea{min-height:74px;resize:vertical}
 .btnrow{display:flex;gap:10px;flex-wrap:wrap;margin-top:18px}
 
 /* ---- Dashboard ---- */
-.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-bottom:16px}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;margin-bottom:16px}
 @media(max-width:680px){.kpis{grid-template-columns:1fr 1fr}}
-.kpi{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px}
+.kpi{background:var(--panel);border:1px solid var(--border);border-radius:var(--radius);padding:16px 18px;box-shadow:var(--shadow);position:relative;overflow:hidden}
+.kpi::before{content:"";position:absolute;top:0;left:0;right:0;height:3px;background:var(--grad);opacity:.85}
 .kpi .klabel{font-size:.78rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
 .kpi .kval{font-size:1.5rem;font-weight:700;letter-spacing:-.02em;margin-top:2px}
 .kpi .ksub{font-size:.8rem;color:var(--muted2)}
@@ -136,8 +153,10 @@ textarea{min-height:74px;resize:vertical}
 .dgrid .dv{font-weight:550;overflow-wrap:anywhere}
 
 /* ---- Dokumente ---- */
-.docrow{display:flex;gap:12px;padding:13px 4px;border-bottom:1px solid var(--border);align-items:flex-start}
+.docrow{display:flex;gap:12px;padding:13px 8px;border-bottom:1px solid var(--border);align-items:flex-start;border-radius:10px;transition:background .1s}
+.docrow:hover{background:var(--panel2)}
 .docrow:last-child{border-bottom:none}
+.dbody{cursor:pointer}
 .dicon{width:36px;height:36px;border-radius:9px;background:var(--panel2);display:grid;place-items:center;font-size:1.05rem;flex:none;margin-top:2px}
 .dbody{flex:1;min-width:0}
 .dname{font-weight:600;font-size:.92rem;overflow-wrap:anywhere}
@@ -228,7 +247,7 @@ body.dark .badge.fach{color:#67e8f9}
 .authscreen{position:fixed;inset:0;display:flex;align-items:center;justify-content:center;background:var(--bg);z-index:100;padding:20px}
 .authscreen[hidden]{display:none}
 .authcard{width:100%;max-width:400px;background:var(--panel);border:1px solid var(--border);border-radius:16px;padding:30px 28px;box-shadow:var(--shadow-lg)}
-.authlogo{width:52px;height:52px;border-radius:14px;background:linear-gradient(140deg,#1d4ed8,#172554);display:grid;place-items:center;font-size:1.6rem;margin:0 auto 14px}
+.authlogo{width:52px;height:52px;border-radius:14px;background:var(--grad);display:grid;place-items:center;font-size:1.6rem;margin:0 auto 14px;box-shadow:0 8px 22px -8px color-mix(in srgb,var(--accent) 70%,transparent)}
 .authcard h1{text-align:center;font-size:1.25rem}
 .authsub{text-align:center;color:var(--muted);font-size:.88rem;margin:6px 0 18px}
 .authmsg{padding:10px 12px;border-radius:9px;font-size:.87rem;margin-bottom:12px;background:var(--panel2)}
@@ -242,7 +261,7 @@ body.app-hidden .shell{display:none}
 /* ---- App-Sperre (nur native App) ---- */
 .lockscreen{position:fixed;inset:0;z-index:300;background:var(--bg);display:flex;flex-direction:column;align-items:center;justify-content:center;padding:28px 20px;gap:6px}
 .lockscreen[hidden]{display:none}
-.locklogo{width:56px;height:56px;border-radius:15px;background:linear-gradient(140deg,#1d4ed8,#172554);display:grid;place-items:center;font-size:1.7rem;margin-bottom:6px}
+.locklogo{width:56px;height:56px;border-radius:15px;background:var(--grad);display:grid;place-items:center;font-size:1.7rem;margin-bottom:6px}
 .locktitle{font-size:1.15rem;font-weight:650}
 .locksub{color:var(--muted);font-size:.9rem;margin-bottom:12px;text-align:center;min-height:20px}
 .lockdots{display:flex;gap:14px;margin:8px 0 20px}
@@ -256,6 +275,22 @@ body.app-hidden .shell{display:none}
 .keybtn.wide{font-size:1rem}
 .lockbio{margin-top:18px;background:none;border:none;color:var(--accent);font:inherit;font-weight:600;font-size:.95rem;cursor:pointer;display:flex;align-items:center;gap:8px}
 
+/* ---- Modal (Dialog / Bottom-Sheet) ---- */
+.modalwrap{position:fixed;inset:0;background:rgba(8,11,20,.45);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);z-index:150;display:flex;align-items:center;justify-content:center;padding:18px}
+.modalbox{background:var(--panel);border:1px solid var(--border);border-radius:18px;max-width:560px;width:100%;max-height:86vh;overflow-y:auto;padding:22px;box-shadow:var(--shadow-lg)}
+.modalbox .sect{margin-bottom:10px}
+.pickrow{display:flex;align-items:center;gap:11px;width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:11px;background:var(--panel);color:var(--fg);font:inherit;cursor:pointer;text-align:left;margin:0 0 8px}
+.pickrow:hover{background:var(--panel2)}
+.pickrow.sug{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 7%,transparent)}
+.pickrow .pkic{width:34px;height:34px;border-radius:9px;background:var(--panel2);display:grid;place-items:center;font-size:1.05rem;flex:none}
+.pickrow .pkt{font-weight:600;font-size:.92rem}
+.pickrow .pks{font-size:.79rem;color:var(--muted)}
+.pickrow>div{min-width:0;flex:1}
+@media(max-width:620px){
+ .modalwrap{align-items:flex-end;padding:0}
+ .modalbox{border-radius:20px 20px 0 0;max-width:none;max-height:88vh;border-left:none;border-right:none;border-bottom:none}
+}
+
 /* ---- Toast ---- */
 #toast{position:fixed;left:50%;bottom:26px;transform:translate(-50%,20px);background:#26262b;color:#fff;padding:13px 20px;border-radius:10px;font-size:.9rem;font-weight:500;opacity:0;pointer-events:none;transition:all .22s;z-index:200;box-shadow:var(--shadow-lg);max-width:min(480px,90vw);min-height:24px}
 #toast.show{opacity:1;transform:translate(-50%,0)}
@@ -266,9 +301,14 @@ body.app-hidden .shell{display:none}
  .shell{grid-template-columns:1fr}
  .sidebar{display:none}
  main{padding:18px 14px 96px}
- .bottomnav{display:flex;position:fixed;left:0;right:0;bottom:0;background:var(--panel);border-top:1px solid var(--border);z-index:30;padding:4px 6px calc(4px + env(safe-area-inset-bottom))}
+ .topbar2{padding:0 14px;gap:9px}
+ .bottomnav{display:flex;position:fixed;left:0;right:0;bottom:0;background:color-mix(in srgb,var(--panel) 88%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-top:1px solid var(--border);z-index:30;padding:4px 6px calc(4px + env(safe-area-inset-bottom))}
  .bottomnav .tab{flex-direction:column;gap:2px;font-size:.68rem;padding:7px 2px;align-items:center;text-align:center;border-radius:10px}
  .bottomnav .tab .tcon{font-size:1.25rem;width:auto;height:auto}
+}
+@media(max-width:560px){
+ .pagetitle{display:none}
+ .gsearch{max-width:none;margin-left:0}
 }
 @media (prefers-reduced-motion: reduce){*{animation:none!important;transition:none!important}}
 </style>
@@ -318,6 +358,11 @@ body.app-hidden .shell{display:none}
   <div class="content">
     <div class="topbar2">
       <div class="pagetitle" id="pageTitle">Übersicht</div>
+      <div class="gsearch">
+        <span class="gsico">🔎</span>
+        <input id="gSearch" type="text" placeholder="Alles durchsuchen …" autocomplete="off">
+        <div class="gresults" id="gResults" hidden></div>
+      </div>
       <div class="topactions">
         <button class="iconchip" id="themeBtn" title="Hell/Dunkel">🌙</button>
       </div>
@@ -326,6 +371,7 @@ body.app-hidden .shell{display:none}
   </div>
 </div>
 <nav class="bottomnav" id="tabsMobile"></nav>
+<div id="modal" class="modalwrap" hidden><div class="modalbox" id="modalBox"></div></div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2/dist/umd/supabase.min.js"></script>
 <script>
@@ -569,17 +615,20 @@ async function createPerson(name){
   if(r.error)throw r.error;
   return r.data;
 }
-async function createPersonUI(){
-  var name=prompt("Name der Person (z. B. Elena Kais):","");
-  if(name==null)return;name=name.trim();if(!name)return;
-  try{await createPerson(name);await loadFromDB();renderApp();toast("Person „"+name+"“ angelegt ✅");}
-  catch(e){toast("Anlegen fehlgeschlagen: "+errMsg(e),true);}
+function createPersonUI(){
+  askModal("👤 Person anlegen","Name der Person","","text","Anlegen",async function(name){
+    name=(name||"").trim();if(!name)return;
+    try{await createPerson(name);await loadFromDB();renderApp();toast("Person „"+name+"“ angelegt ✅");}
+    catch(e){toast("Anlegen fehlgeschlagen: "+errMsg(e),true);}
+  });
 }
-async function renamePersonUI(id){
+function renamePersonUI(id){
   var p=personById(id);if(!p)return;
-  var name=prompt("Name ändern:",p.name);if(name==null)return;name=name.trim();if(!name)return;
-  try{var r=await sb.from("persons").update({name:name}).eq("id",id);if(r.error)throw r.error;await loadFromDB();renderApp();toast("Person umbenannt ✅");}
-  catch(e){toast("Umbenennen fehlgeschlagen: "+errMsg(e),true);}
+  askModal("✏️ Person umbenennen","Name",p.name,"text","Speichern",async function(name){
+    name=(name||"").trim();if(!name)return;
+    try{var r=await sb.from("persons").update({name:name}).eq("id",id);if(r.error)throw r.error;await loadFromDB();renderApp();toast("Person umbenannt ✅");}
+    catch(e){toast("Umbenennen fehlgeschlagen: "+errMsg(e),true);}
+  });
 }
 async function deletePersonUI(id){
   var p=personById(id);if(!p)return;
@@ -988,20 +1037,6 @@ async function reviewCreatePerson(name){
   try{var p=await createPerson(name);if(p)await assignReviewPerson(reviewDoc.id,p.id);}
   catch(e){toast("Anlegen fehlgeschlagen: "+errMsg(e),true);}
 }
-/* Person eines Vertrags ändern (per Auswahl-Prompt) */
-function changeContractPersonUI(contractId){
-  var c=contractById(contractId);if(!c)return;
-  if(!PERSONS.length){createPersonUI();return;}
-  var list=PERSONS.map(function(p,i){return (i+1)+" = "+p.name;}).join("\n");
-  var input=prompt("Welcher Person zuordnen?\n\n"+list+"\n\n0 = keine Person\nN = neue Person anlegen",c.person_id?String(PERSONS.findIndex(function(p){return p.id===c.person_id;})+1):"1");
-  if(input===null)return;
-  var t=(input||"").trim();
-  if(t.toUpperCase()==="N"){(async function(){var name=prompt("Name der neuen Person:","");if(name==null)return;name=name.trim();if(!name)return;try{var p=await createPerson(name);if(p)await setContractPerson(contractId,p.id);}catch(e){toast("Fehlgeschlagen: "+errMsg(e),true);}})();return;}
-  var n=parseInt(t,10);
-  if(n===0){setContractPerson(contractId,null);return;}
-  if(!n||n<1||n>PERSONS.length){toast("Ungültige Auswahl.",true);return;}
-  setContractPerson(contractId,PERSONS[n-1].id);
-}
 
 /* ---------- Views ---------- */
 var contractsCostSort=false;
@@ -1043,12 +1078,16 @@ function viewDashboard(){
   });
   var fr=rows.length?rows.map(function(r){return fristRow(r.c,r.f);}).join(""):'<p class="muted">Noch keine Verträge. Lade ein Dokument hoch oder lege einen Vertrag an – der Butler übernimmt den Rest.</p>';
   var recent=DS.slice(0,3).map(docRow).join("")||'<p class="muted">Noch keine Dokumente im Archiv.</p>';
+  var medsDS=DS.filter(isMed),jahrNow=todayISO().slice(0,4);
+  var medJahr=medsDS.reduce(function(s,d){var dt=(d.behandlungsdatum||d.doc_date||"");return (d.betrag!=null&&String(dt).slice(0,4)===jahrNow)?s+Number(d.betrag):s;},0);
+  var medKpi=medsDS.length?('<div class="kpi kpiclick" data-nav="gesundheit"><div class="klabel">Gesundheit ›</div><div class="kval">'+fmtEur(medJahr)+'</div><div class="ksub">Arztkosten '+jahrNow+'</div></div>'):"";
   return '<button class="bigadd" data-nav="add">➕ &nbsp;Dokument hochladen oder fotografieren</button>'+
     personBar()+
     '<div class="kpis">'+
       '<div class="kpi kpiclick" data-action="drill-costs"><div class="klabel">Monatliche Kosten ›</div><div class="kval">'+fmtEur(mk)+'</div><div class="ksub">'+aktive.length+' aktive Verträge</div></div>'+
       '<div class="kpi kpiclick" data-action="drill-costs"><div class="klabel">Kosten pro Jahr ›</div><div class="kval">'+fmtEur(mk*12)+'</div><div class="ksub">laufende Verträge</div></div>'+
       '<div class="kpi kpiclick" data-nav="docs"><div class="klabel">Dokumente ›</div><div class="kval">'+DS.length+'</div><div class="ksub">im Archiv</div></div>'+
+      medKpi+
     '</div>'+
     butlerTips(CS,DS)+
     '<section class="card"><h2 class="sect">⏰ Fristen im Blick</h2>'+fr+'</section>'+
@@ -1065,6 +1104,18 @@ function butlerTips(CS,DS){
       tips.push({txt:'Bei „'+escapeHtml(c.anbieter||"?")+'“ fehlen Vertragsbeginn oder Mindestlaufzeit – ergänze sie, dann überwacht der Butler die Kündigungsfrist.',btn:"Ergänzen",action:"edit-contract",id:c.id});
     if(c.status==="gekuendigt"&&c.gekuendigt_zum&&c.gekuendigt_zum<todayISO())
       tips.push({txt:'„'+escapeHtml(c.anbieter||"?")+'“ war zum '+fmtDate(c.gekuendigt_zum)+' gekündigt und ist inzwischen abgelaufen.',btn:"Als beendet markieren",action:"tip-ended",id:c.id});
+  });
+  /* Rechnungs-Trend: letzte Rechnung deutlich teurer als die davor */
+  CS.forEach(function(c){
+    if(c.status!=="aktiv")return;
+    var invs=DS.filter(function(d){return d.contract_id===c.id&&d.doc_type==="rechnung"&&d.extracted&&d.extracted.betrag!=null;})
+      .map(function(d){return {b:Number(d.extracted.betrag),date:invoiceDate(d)};})
+      .sort(function(a,b){return String(a.date).localeCompare(String(b.date));});
+    if(invs.length>=2){
+      var last=invs[invs.length-1].b,prev=invs[invs.length-2].b;
+      if(last>prev&&(last-prev)>Math.max(1,prev*0.05))
+        tips.push({txt:'Die letzte Rechnung von „'+escapeHtml(c.anbieter||"?")+'“ ist um '+fmtEur(last-prev)+' höher als die davor ('+fmtEur(prev)+' → '+fmtEur(last)+').',btn:"Verlauf ansehen",action:"open-contract",id:c.id});
+    }
   });
   var unlinked=DS.filter(function(d){return !isMed(d)&&!d.contract_id&&["vertrag","rechnung","police","preisaenderung","kuendigung"].indexOf(d.doc_type)>=0;}).length;
   if(unlinked)tips.push({txt:unlinked+(unlinked===1?" Dokument ist":" Dokumente sind")+" noch keinem Vertrag zugeordnet – zugeordnet findet der Butler sie schneller wieder.",btn:"Ansehen",nav:"docs"});
@@ -1341,16 +1392,18 @@ async function onSaveContract(){
 }
 async function setContractStatus(id,status){
   var c=contractById(id);if(!c)return;
-  var cols={status:status};
   if(status==="gekuendigt"){
     var f=fristInfo(c);
-    var vorschlag=f.end||"";
-    var zum=prompt("Gekündigt zum (Datum, JJJJ-MM-TT):",vorschlag);
-    if(zum===null)return;
-    cols.gekuendigt_zum=(zum||"").trim()||null;
-  }else{cols.gekuendigt_zum=null;}
+    askModal("✂️ Als gekündigt markieren","Gekündigt zum",f.end||"","date","Speichern",function(zum){
+      applyContractStatus(id,"gekuendigt",(zum||"").trim()||null);
+    });
+    return;
+  }
+  applyContractStatus(id,status,null);
+}
+async function applyContractStatus(id,status,zum){
   try{
-    await saveContractData(cols,id);
+    await saveContractData({status:status,gekuendigt_zum:zum},id);
     await loadFromDB();renderApp();
     toast(status==="gekuendigt"?"Als gekündigt markiert ✂️":"Wieder aktiv ✅");
   }catch(e){toast("Änderung fehlgeschlagen: "+errMsg(e),true);}
@@ -1381,7 +1434,7 @@ function docRow(d){
   var c=d.contract_id?contractById(d.contract_id):null;
   var kat=(d.extracted&&d.extracted.kategorie)?katInfo(d.extracted.kategorie):null;
   return '<div class="docrow"><span class="dicon">'+t.icon+'</span>'+
-    '<div class="dbody"><div class="dname">'+escapeHtml(d.filename||"Dokument")+'</div>'+
+    '<div class="dbody" data-action="doc-open" data-id="'+d.id+'" title="Details anzeigen"><div class="dname">'+escapeHtml(d.filename||"Dokument")+'</div>'+
     (d.zusammenfassung?'<div class="dsum">'+escapeHtml(d.zusammenfassung)+'</div>':"")+
     '<div class="dmeta">'+(d.person_id?personBadge(d.person_id):"")+'<span>'+t.label+'</span>'+(kat?'<span>'+kat.icon+' '+kat.label+'</span>':"")+'<span>'+fmtDate(d.doc_date||String(d.created_at).slice(0,10))+'</span>'+
     (c?'<span>🔗 '+escapeHtml(c.anbieter||"Vertrag")+'</span>':'<span class="muted">ohne Vertrag</span>')+'</div></div>'+
@@ -1395,7 +1448,7 @@ function medRow(d){
   var mt=medTypInfo(d.med_typ),fa=d.fachrichtung?fachInfo(d.fachrichtung):null;
   var beh=(d.extracted&&d.extracted.behandlung)?d.extracted.behandlung:"";
   return '<div class="docrow"><span class="dicon">'+mt.icon+'</span>'+
-    '<div class="dbody"><div class="dname">'+(fa?fa.icon+' ':"")+escapeHtml(d.arzt||(fa?fa.label:"Arzt-Dokument"))+'</div>'+
+    '<div class="dbody" data-action="doc-open" data-id="'+d.id+'" title="Details anzeigen"><div class="dname">'+(fa?fa.icon+' ':"")+escapeHtml(d.arzt||(fa?fa.label:"Arzt-Dokument"))+'</div>'+
     (beh?'<div class="behnote">'+escapeHtml(beh)+'</div>':(d.zusammenfassung?'<div class="dsum">'+escapeHtml(d.zusammenfassung)+'</div>':""))+
     '<div class="dmeta">'+(d.person_id?personBadge(d.person_id):"")+(fa?'<span class="badge fach">'+fa.icon+' '+fa.label+'</span>':"")+'<span>'+mt.label+'</span>'+
     '<span>'+fmtDate(d.behandlungsdatum||d.doc_date||String(d.created_at).slice(0,10))+'</span>'+(d.betrag!=null?'<span><b>'+fmtEur(d.betrag)+'</b></span>':"")+'</div></div>'+
@@ -1814,15 +1867,16 @@ async function switchHousehold(hid){
   try{await loadFromDB();}catch(e){toast("Daten konnten nicht geladen werden: "+errMsg(e),true);}
   renderApp();toast("Haushalt gewechselt: "+activeHouseholdName()+" ✅");
 }
-async function renameHouseholdUI(){
+function renameHouseholdUI(){
   var cur=HOUSEHOLDS.find(function(h){return h.id===activeHousehold;});
-  var name=prompt("Neuer Name für den Haushalt:",cur?cur.name:"");
-  if(name==null)return;name=name.trim();if(!name)return;
-  try{
-    var r=await sbPub.from("households").update({name:name}).eq("id",activeHousehold);
-    if(r.error)throw r.error;
-    await loadHouseholds();renderApp();toast("Haushalt umbenannt ✅");
-  }catch(e){toast("Umbenennen fehlgeschlagen: "+errMsg(e),true);}
+  askModal("✏️ Haushalt umbenennen","Neuer Name",cur?cur.name:"","text","Speichern",async function(name){
+    name=(name||"").trim();if(!name)return;
+    try{
+      var r=await sbPub.from("households").update({name:name}).eq("id",activeHousehold);
+      if(r.error)throw r.error;
+      await loadHouseholds();renderApp();toast("Haushalt umbenannt ✅");
+    }catch(e){toast("Umbenennen fehlgeschlagen: "+errMsg(e),true);}
+  });
 }
 async function inviteUI(){
   if(!activeHousehold)return;
@@ -1871,7 +1925,7 @@ function handleSession(session){
 function applyTheme(dark){
   document.body.classList.toggle("dark",!!dark);
   var b=$("#themeBtn");if(b)b.textContent=dark?"☀️":"🌙";
-  var tc=document.querySelector('meta[name="theme-color"]');if(tc)tc.setAttribute("content",dark?"#09090b":"#1d4ed8");
+  var tc=document.querySelector('meta[name="theme-color"]');if(tc)tc.setAttribute("content",dark?"#0b0e16":"#2563eb");
   try{localStorage.setItem("dbTheme",dark?"dark":"light");}catch(e){}
 }
 
@@ -1942,7 +1996,7 @@ async function scheduleFristNotifications(){
 function nativeInit(){
   if(!isNative())return;
   document.body.classList.add("native");
-  var SB=capPlugin("StatusBar");if(SB){try{SB.setBackgroundColor({color:"#1d4ed8"});SB.setStyle({style:"LIGHT"});}catch(e){}}
+  var SB=capPlugin("StatusBar");if(SB){try{SB.setBackgroundColor({color:"#2563eb"});SB.setStyle({style:"LIGHT"});}catch(e){}}
   var Splash=capPlugin("SplashScreen");if(Splash){try{setTimeout(function(){Splash.hide&&Splash.hide();},300);}catch(e){}}
   var App=capPlugin("App");
   if(App&&App.addListener){
@@ -2133,13 +2187,158 @@ function gdriveCard(){
   '</section>';
 }
 
+/* ---------- Modal-Dialoge (ersetzen die Browser-Prompts) ---------- */
+var modalCb=null;
+function openModal(html){var w=$("#modal");if(!w)return;$("#modalBox").innerHTML=html;w.hidden=false;}
+function closeModal(){var w=$("#modal");if(!w)return;w.hidden=true;$("#modalBox").innerHTML="";modalCb=null;}
+function askModal(title,label,value,type,btnLabel,cb){
+  modalCb=cb;
+  openModal('<h2 class="sect">'+title+'</h2><label class="f">'+label+'</label><input type="'+(type||"text")+'" id="mq_input" value="'+escapeHtml(value==null?"":value)+'">'+
+    '<div class="btnrow"><button class="primary" data-action="mq-ok">'+(btnLabel||"Speichern")+'</button><button class="ghost" data-action="modal-close">Abbrechen</button></div>');
+  var i=$("#mq_input");if(i){i.focus();try{if(type!=="date")i.select();}catch(e){}}
+}
+
+/* ---------- Dokument-Schnellansicht + Bearbeiten ---------- */
+function openDocDetail(id){
+  var d=DOCS.find(function(x){return x.id===id;});if(!d)return;
+  if(isMed(d)){medEditId=id;if(reviewDoc&&reviewDoc.id===id)reviewDoc=null;closeModal();activeView="med-form";renderApp();window.scrollTo({top:0,behavior:"smooth"});return;}
+  var t=dtInfo(d.doc_type),ext=d.extracted||{};
+  var c=d.contract_id?contractById(d.contract_id):null;
+  var kat=ext.kategorie?katInfo(ext.kategorie):null;
+  var size=d.size_bytes?(d.size_bytes<1048576?Math.max(1,Math.round(d.size_bytes/1024))+" KB":(d.size_bytes/1048576).toLocaleString("de-DE",{maximumFractionDigits:1})+" MB"):"–";
+  var rows='<div class="dgrid">'+
+    dRow("Art",t.icon+" "+t.label)+
+    (kat?dRow("Kategorie",kat.icon+" "+kat.label):"")+
+    dRow("Person",d.person_id?personBadge(d.person_id):'<span class="muted">–</span>')+
+    dRow("Dokumentdatum",fmtDate(d.doc_date))+
+    dRow("Vertrag",c?(katInfo(c.kategorie).icon+" "+escapeHtml(c.anbieter||"?")+(c.produkt?" – "+escapeHtml(c.produkt):"")):'<span class="muted">nicht zugeordnet</span>')+
+    (ext.betrag!=null?dRow("Betrag",fmtEur(ext.betrag)):"")+
+    ((ext.zeitraumVon||ext.zeitraumBis)?dRow("Zeitraum",(ext.zeitraumVon?fmtDate(ext.zeitraumVon):"?")+" – "+(ext.zeitraumBis?fmtDate(ext.zeitraumBis):"?")):"")+
+    (ext.kundennummer?dRow("Kundennummer",escapeHtml(ext.kundennummer)):"")+
+    (ext.vertragsnummer?dRow("Vertragsnummer",escapeHtml(ext.vertragsnummer)):"")+
+    dRow("Datei",escapeHtml(d.filename||"–")+" · "+size)+
+    dRow("Hochgeladen",fmtDate(String(d.created_at).slice(0,10)))+
+    (d.note?dRow("Notiz",escapeHtml(d.note)):"")+
+  '</div>';
+  var wichtig=(ext.wichtig&&ext.wichtig.length)?'<ul class="wichtig">'+ext.wichtig.map(function(w){return '<li>'+escapeHtml(w)+'</li>';}).join("")+'</ul>':"";
+  openModal('<h2 class="sect">'+t.icon+' '+escapeHtml(d.filename||"Dokument")+'</h2>'+
+    (d.zusammenfassung?'<p style="margin:4px 0 8px">'+escapeHtml(d.zusammenfassung)+'</p>':"")+
+    wichtig+(ext.hinweise?'<div class="ainote">💡 '+escapeHtml(ext.hinweise)+'</div>':"")+rows+
+    '<div class="btnrow">'+
+    '<button class="primary" data-action="doc-view" data-id="'+d.id+'">👁️ Ansehen</button>'+
+    '<button class="ghost" data-action="doc-edit" data-id="'+d.id+'">✏️ Bearbeiten</button>'+
+    '<button class="ghost" data-action="doc-link" data-id="'+d.id+'">🔗 Zuordnen</button>'+
+    (c?'<button class="ghost" data-action="open-contract" data-id="'+c.id+'">📑 Zum Vertrag</button>':"")+
+    '<button class="danger" data-action="doc-del" data-id="'+d.id+'">🗑️</button>'+
+    '<button class="ghost" data-action="modal-close">Schließen</button></div>');
+}
+function openDocEdit(id){
+  var d=DOCS.find(function(x){return x.id===id;});if(!d)return;
+  var ext=d.extracted||{};
+  var typOpts=Object.keys(DOCTYPE).map(function(k){return '<option value="'+k+'"'+(k===(d.doc_type||"sonstiges")?" selected":"")+'>'+DOCTYPE[k].icon+' '+DOCTYPE[k].label+'</option>';}).join("");
+  var kat=ext.kategorie||"";
+  var katOpts='<option value="">— keine —</option>'+Object.keys(KAT).map(function(k){return '<option value="'+k+'"'+(k===kat?" selected":"")+'>'+KAT[k].icon+' '+KAT[k].label+'</option>';}).join("");
+  var personOpts='<option value="">— keine —</option>'+PERSONS.map(function(p){return '<option value="'+p.id+'"'+(p.id===(d.person_id||"")?" selected":"")+'>'+escapeHtml(p.name)+'</option>';}).join("");
+  openModal('<h2 class="sect">✏️ Dokument bearbeiten</h2>'+
+   '<label class="f">Name / Titel</label><input type="text" id="de_name" value="'+escapeHtml(d.filename||"")+'">'+
+   '<div class="formrow">'+
+   '<div><label class="f">Art</label><select id="de_typ">'+typOpts+'</select></div>'+
+   '<div><label class="f">Kategorie</label><select id="de_kat">'+katOpts+'</select></div>'+
+   '<div><label class="f">Dokumentdatum</label><input type="date" id="de_datum" value="'+escapeHtml(d.doc_date||"")+'"></div>'+
+   '<div><label class="f">Person</label><select id="de_person">'+personOpts+'</select></div>'+
+   '</div>'+
+   '<label class="f">Zusammenfassung</label><textarea id="de_sum">'+escapeHtml(d.zusammenfassung||"")+'</textarea>'+
+   '<label class="f">Notiz</label><textarea id="de_note">'+escapeHtml(d.note||"")+'</textarea>'+
+   '<div class="btnrow"><button class="primary" data-action="doc-edit-save" data-id="'+d.id+'">💾 Speichern</button><button class="ghost" data-action="doc-open" data-id="'+d.id+'">Abbrechen</button></div>');
+}
+async function saveDocEdit(id){
+  var d=DOCS.find(function(x){return x.id===id;});if(!d)return;
+  var ext=Object.assign({},d.extracted||{});
+  ext.kategorie=$("#de_kat").value||null;
+  var cols={
+    filename:($("#de_name").value||"").trim()||d.filename,
+    doc_type:$("#de_typ").value||"sonstiges",
+    doc_date:$("#de_datum").value||null,
+    person_id:$("#de_person").value||null,
+    zusammenfassung:($("#de_sum").value||"").trim()||null,
+    note:($("#de_note").value||"").trim()||null,
+    extracted:ext
+  };
+  try{var r=await sb.from("documents").update(cols).eq("id",id);if(r.error)throw r.error;
+    await loadFromDB();closeModal();renderApp();toast("Dokument gespeichert ✅");}
+  catch(e){toast("Speichern fehlgeschlagen: "+errMsg(e),true);}
+}
+
+/* ---------- Auswahl-Dialoge: Vertrag / Person ---------- */
+function openLinkPicker(docId){
+  var d=DOCS.find(function(x){return x.id===docId;});if(!d)return;
+  if(!CONTRACTS.length){toast("Lege zuerst einen Vertrag an, dann kannst du zuordnen.",true);return;}
+  var sug=(!d.contract_id&&d.extracted)?findMatch(d.extracted):null;
+  var rows="";
+  if(sug)rows+='<button class="pickrow sug" data-action="pick-contract" data-doc="'+d.id+'" data-id="'+sug.id+'"><span class="pkic">'+katInfo(sug.kategorie).icon+'</span><div><div class="pkt">'+escapeHtml(sug.anbieter||"?")+(sug.produkt?' · '+escapeHtml(sug.produkt):"")+'</div><div class="pks">🎩 Vorschlag des Butlers</div></div></button>';
+  rows+=CONTRACTS.filter(function(c){return !sug||c.id!==sug.id;}).map(function(c){
+    return '<button class="pickrow" data-action="pick-contract" data-doc="'+d.id+'" data-id="'+c.id+'"><span class="pkic">'+katInfo(c.kategorie).icon+'</span><div><div class="pkt">'+escapeHtml(c.anbieter||"?")+(c.produkt?' · '+escapeHtml(c.produkt):"")+'</div><div class="pks">'+katInfo(c.kategorie).label+(c.kosten!=null?' · '+fmtEur(c.kosten)+' / '+(INTERVALL_LABEL[c.kosten_intervall]||"?"):"")+'</div></div></button>';
+  }).join("");
+  if(d.contract_id)rows+='<button class="pickrow" data-action="pick-contract" data-doc="'+d.id+'" data-id=""><span class="pkic">✖️</span><div><div class="pkt">Zuordnung entfernen</div></div></button>';
+  openModal('<h2 class="sect">🔗 Dokument zuordnen</h2><p class="muted" style="font-size:.88rem;margin-bottom:10px">Zu welchem Vertrag gehört „'+escapeHtml(d.filename||"Dokument")+'“?</p>'+rows+'<div class="btnrow"><button class="ghost" data-action="modal-close">Abbrechen</button></div>');
+}
+function openPersonPicker(contractId){
+  var c=contractById(contractId);if(!c)return;
+  var rows=PERSONS.map(function(p){
+    return '<button class="pickrow'+(c.person_id===p.id?" sug":"")+'" data-action="pick-person" data-cid="'+c.id+'" data-id="'+p.id+'"><span class="pkic"><span class="pdot" style="background:'+personColor(p)+'"></span></span><div><div class="pkt">'+escapeHtml(p.name)+'</div>'+(c.person_id===p.id?'<div class="pks">aktuell zugeordnet</div>':"")+'</div></button>';
+  }).join("");
+  rows+='<button class="pickrow" data-action="pick-person" data-cid="'+c.id+'" data-id=""><span class="pkic">✖️</span><div><div class="pkt">Keine Person</div></div></button>';
+  openModal('<h2 class="sect">👤 Person zuordnen</h2>'+rows+
+    '<label class="f">Oder neue Person anlegen</label><div class="hhadd"><input type="text" id="pp_new" placeholder="Name, z. B. Elena Kais"><button class="ghost" data-action="pick-person-new" data-cid="'+c.id+'">Anlegen</button></div>'+
+    '<div class="btnrow"><button class="ghost" data-action="modal-close">Abbrechen</button></div>');
+}
+
+/* ---------- Globale Suche (alles: Verträge, Dokumente, Gesundheit, Personen) ---------- */
+function gsHide(){var b=$("#gResults");if(b){b.hidden=true;b.innerHTML="";}}
+function gsRun(){
+  var inp=$("#gSearch"),box=$("#gResults");if(!inp||!box)return;
+  var q=(inp.value||"").trim().toLowerCase();
+  if(!currentUser||q.length<2){gsHide();return;}
+  function hit(s){return String(s||"").toLowerCase().indexOf(q)>=0;}
+  var vc=[],vd=[],vm=[],vp=[];
+  CONTRACTS.forEach(function(c){
+    var k=katInfo(c.kategorie);
+    if(hit(c.anbieter)||hit(c.produkt)||hit(c.kundennummer)||hit(c.vertragsnummer)||hit(c.notizen)||hit(k.label))
+      vc.push({icon:k.icon,t:(c.anbieter||"?")+(c.produkt?" · "+c.produkt:""),s:k.label+(c.kosten!=null?" · "+fmtEur(c.kosten)+" / "+(INTERVALL_LABEL[c.kosten_intervall]||"?"):"")+(c.status!=="aktiv"?" · "+c.status:""),type:"contract",id:c.id});
+  });
+  DOCS.forEach(function(d){
+    var e=d.extracted||{};
+    if(hit(d.filename)||hit(d.zusammenfassung)||hit(d.arzt)||hit(d.note)||hit(e.anbieter)||hit(e.kundennummer)||hit(e.vertragsnummer)||hit(e.behandlung)){
+      if(isMed(d))vm.push({icon:fachInfo(d.fachrichtung||"sonstiges").icon,t:d.arzt||fachInfo(d.fachrichtung||"sonstiges").label,s:medTypInfo(d.med_typ).label+" · "+fmtDate(d.behandlungsdatum||d.doc_date||String(d.created_at).slice(0,10))+(d.betrag!=null?" · "+fmtEur(d.betrag):""),type:"med",id:d.id});
+      else vd.push({icon:dtInfo(d.doc_type).icon,t:d.filename||"Dokument",s:dtInfo(d.doc_type).label+" · "+fmtDate(d.doc_date||String(d.created_at).slice(0,10)),type:"doc",id:d.id});
+    }
+  });
+  PERSONS.forEach(function(p){if(hit(p.name))vp.push({icon:"👤",t:p.name,s:"Person – tippen zum Filtern",type:"person",id:p.id});});
+  function grp(label,arr){
+    if(!arr.length)return "";
+    return '<div class="grhead">'+label+'</div>'+arr.slice(0,5).map(function(r){
+      return '<button class="grow" data-gres="'+r.type+'" data-id="'+r.id+'"><span class="gric">'+r.icon+'</span><div><div class="grt">'+escapeHtml(r.t)+'</div><div class="grs">'+escapeHtml(r.s)+'</div></div></button>';
+    }).join("");
+  }
+  var html=grp("📑 Verträge",vc)+grp("📁 Dokumente",vd)+grp("🩺 Gesundheit",vm)+grp("👥 Personen",vp);
+  box.innerHTML=html||'<div class="grempty">Nichts gefunden für „'+escapeHtml(q)+'“.</div>';
+  box.hidden=false;
+}
+function gsOpen(type,id){
+  var inp=$("#gSearch");if(inp)inp.value="";gsHide();
+  if(type==="contract"){detailId=id;activeView="contract-detail";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
+  else if(type==="doc")openDocDetail(id);
+  else if(type==="med"){medEditId=id;activeView="med-form";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
+  else if(type==="person"){activePerson=id;go("dashboard");}
+}
+
 /* ---------- Events ---------- */
 function onAppClick(e){
   var nav=e.target.closest("[data-nav]");
   if(nav){if(nav.dataset.nav==="add"){reviewDoc=null;importResults=[];}go(nav.dataset.nav);return;}
   var b=e.target.closest("[data-action]");if(!b)return;
   var act=b.dataset.action,id=b.dataset.id;
-  if(act==="open-contract"){detailId=id;activeView="contract-detail";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
+  if(act==="open-contract"){closeModal();detailId=id;activeView="contract-detail";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
   else if(act==="new-contract"){editId=null;formPrefill=null;pendingDoc=null;formPerson=activePerson||"";activeView="contract-form";renderApp();}
   else if(act==="edit-contract"){editId=id;formPrefill=null;activeView="contract-form";renderApp();}
   else if(act==="save-contract")onSaveContract();
@@ -2148,8 +2347,21 @@ function onAppClick(e){
   else if(act==="mark-active")setContractStatus(id,"aktiv");
   else if(act==="ics"){var c=contractById(id);if(c)icsDownload(c);}
   else if(act==="doc-view")viewDoc(id);
-  else if(act==="doc-del")deleteDoc(id);
-  else if(act==="doc-link")docLinkUI(id);
+  else if(act==="doc-del"){closeModal();deleteDoc(id);}
+  else if(act==="doc-link")openLinkPicker(id);
+  else if(act==="doc-open")openDocDetail(id);
+  else if(act==="doc-edit")openDocEdit(id);
+  else if(act==="doc-edit-save")saveDocEdit(id);
+  else if(act==="pick-contract"){var pcDoc=b.dataset.doc;closeModal();linkDoc(pcDoc,id||null);}
+  else if(act==="pick-person"){var ppCid=b.dataset.cid;closeModal();setContractPerson(ppCid,id||null);}
+  else if(act==="pick-person-new"){
+    var ppCid2=b.dataset.cid,ppInp=$("#pp_new"),ppName=ppInp?(ppInp.value||"").trim():"";
+    if(!ppName){toast("Bitte einen Namen eingeben.",true);return;}
+    closeModal();
+    (async function(){try{var p=await createPerson(ppName);if(p)await setContractPerson(ppCid2,p.id);}catch(e){toast("Fehlgeschlagen: "+errMsg(e),true);}})();
+  }
+  else if(act==="mq-ok"){var mqv=$("#mq_input")?$("#mq_input").value:"";var mqcb=modalCb;modalCb=null;closeModal();if(mqcb)mqcb(mqv);}
+  else if(act==="modal-close")closeModal();
   else if(act==="to-med")toMedical(id);
   else if(act==="med-edit"){medEditId=id;if(reviewDoc&&reviewDoc.id===id)reviewDoc=null;activeView="med-form";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
   else if(act==="med-save")onSaveMed();
@@ -2178,7 +2390,7 @@ function onAppClick(e){
   else if(act==="person-add-inline")createPersonUI();
   else if(act==="person-rename")renamePersonUI(id);
   else if(act==="person-del")deletePersonUI(id);
-  else if(act==="change-person")changeContractPersonUI(id);
+  else if(act==="change-person")openPersonPicker(id);
   else if(act==="review-setperson"){if(reviewDoc)assignReviewPerson(reviewDoc.id,id);}
   else if(act==="review-createperson"){reviewCreatePerson(b.dataset.name);}
   else if(act==="hh-switch")switchHousehold(id);
@@ -2194,23 +2406,6 @@ function onAppClick(e){
   else if(act==="set-model")setModel(b.dataset.val);
   else if(act==="acc-change-pass")changeAccountPassword();
   else if(act==="logout")doLogout();
-}
-function docLinkUI(docId){
-  if(!CONTRACTS.length){toast("Lege zuerst einen Vertrag an, dann kannst du zuordnen.",true);return;}
-  var d=DOCS.find(function(x){return x.id===docId;});if(!d)return;
-  /* intelligenter Vorschlag: der Butler prüft Kundennummer/Anbieter aus dem Dokument */
-  if(!d.contract_id&&d.extracted){
-    var sug=findMatch(d.extracted);
-    if(sug&&confirm("🎩 Vorschlag des Butlers: zu „"+(sug.anbieter||"?")+(sug.produkt?" – "+sug.produkt:"")+"“ zuordnen?"))
-      {linkDoc(docId,sug.id);return;}
-  }
-  var list=CONTRACTS.map(function(c,i){return (i+1)+" = "+(c.anbieter||"?")+(c.produkt?" ("+c.produkt+")":"");}).join("\n");
-  var input=prompt("Welchem Vertrag zuordnen?\n\n"+list+"\n\n0 = Zuordnung entfernen",d.contract_id?"":"1");
-  if(input===null)return;
-  var n=parseInt(input,10);
-  if(n===0){linkDoc(docId,null);return;}
-  if(!n||n<1||n>CONTRACTS.length){toast("Ungültige Auswahl.",true);return;}
-  linkDoc(docId,CONTRACTS[n-1].id);
 }
 function onAppChange(e){
   if(e.target.id&&e.target.id.indexOf("cf_")===0){updateFormPreview();return;}
@@ -2245,6 +2440,32 @@ function init(){
   app.addEventListener("click",onAppClick);
   app.addEventListener("change",onAppChange);
   app.addEventListener("input",onAppInput);
+  /* Modal-Dialoge */
+  var mbx=$("#modalBox");
+  if(mbx){
+    mbx.addEventListener("click",onAppClick);
+    mbx.addEventListener("change",onAppChange);
+    mbx.addEventListener("input",onAppInput);
+    mbx.addEventListener("keydown",function(e){
+      if(e.key!=="Enter"||!e.target)return;
+      if(e.target.id==="mq_input"){var ok=mbx.querySelector('[data-action="mq-ok"]');if(ok)ok.click();}
+      else if(e.target.id==="pp_new"){var pn=mbx.querySelector('[data-action="pick-person-new"]');if(pn)pn.click();}
+    });
+  }
+  var mwrap=$("#modal");if(mwrap)mwrap.addEventListener("click",function(e){if(e.target===mwrap)closeModal();});
+  /* Globale Suche */
+  var gs=$("#gSearch");
+  if(gs){
+    gs.addEventListener("input",function(){clearTimeout(gsRun._t);gsRun._t=setTimeout(gsRun,180);});
+    gs.addEventListener("focus",gsRun);
+    gs.addEventListener("keydown",function(e){if(e.key==="Escape"){gs.value="";gsHide();gs.blur();}});
+  }
+  var gr=$("#gResults");if(gr)gr.addEventListener("click",function(e){var b=e.target.closest("[data-gres]");if(b)gsOpen(b.dataset.gres,b.dataset.id);});
+  document.addEventListener("click",function(e){if(!e.target.closest(".gsearch"))gsHide();});
+  document.addEventListener("keydown",function(e){
+    if((e.ctrlKey||e.metaKey)&&(e.key==="k"||e.key==="K")){e.preventDefault();var g=$("#gSearch");if(g)g.focus();}
+    else if(e.key==="Escape"){var mw=$("#modal");if(mw&&!mw.hidden)closeModal();}
+  });
   function onNav(e){var b=e.target.closest("[data-nav]");if(b){if(b.dataset.nav==="add"){reviewDoc=null;importResults=[];}go(b.dataset.nav);}}
   var t=$("#tabs");if(t)t.addEventListener("click",onNav);
   var tf=$("#tabsFoot");if(tf)tf.addEventListener("click",onNav);
