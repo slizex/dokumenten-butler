@@ -94,6 +94,9 @@ textarea{min-height:74px;resize:vertical}
 .kpi .klabel{font-size:.78rem;font-weight:600;color:var(--muted);text-transform:uppercase;letter-spacing:.05em}
 .kpi .kval{font-size:1.5rem;font-weight:700;letter-spacing:-.02em;margin-top:2px}
 .kpi .ksub{font-size:.8rem;color:var(--muted2)}
+.kpiclick{cursor:pointer;transition:border-color .12s,transform .06s}
+.kpiclick:hover{border-color:var(--accent)}
+.kpiclick:active{transform:scale(.99)}
 .bigadd{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:16px;border:2px dashed var(--border2);border-radius:var(--radius);background:none;color:var(--muted);font:inherit;font-weight:600;font-size:1rem;cursor:pointer;margin-bottom:16px}
 .bigadd:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 5%,transparent)}
 
@@ -411,8 +414,8 @@ var formPrefill=null;       /* Vorbefüllung des Vertragsformulars (aus KI) */
 var formPerson="";          /* vorgewählte Person fürs Formular */
 var pendingDoc=null;        /* zuletzt hochgeladenes Dokument (fürs Verknüpfen) */
 var reviewDoc=null;         /* Dokument im KI-Review */
-var docFilter={kat:"",typ:"",q:""};
-var medFilter={fach:"",typ:""};
+var docFilter={kat:"",typ:"",q:"",jahr:"",sort:"date_desc"};
+var medFilter={fach:"",typ:"",arzt:"",jahr:"",sort:"date_desc"};
 var medEditId=null;         /* medizinisches Dokument im Bearbeiten-Formular */
 var PERSON_COLORS=["#1d4ed8","#0891b2","#7c3aed","#c026d3","#db2777","#ea580c","#65a30d","#0d9488"];
 
@@ -647,7 +650,8 @@ function compressImage(file){
   });
 }
 function isEmlFile(file){return file.type==="message/rfc822"||/\.eml$/i.test(file.name||"");}
-var importResults=[],importBusy=false;
+var importResults=[],importBusy=false,importCancel=false,importTotal=0,importDone=0;
+function modelPref(){try{return localStorage.getItem("db_model")==="advanced"?"advanced":"basic";}catch(e){return "basic";}}
 
 /* Mehrere Dateien nacheinander automatisch einlesen + einsortieren */
 async function processFiles(files){
@@ -655,18 +659,23 @@ async function processFiles(files){
   if(!files.length)return;
   if(!currentUser){pendingSharedFile=files[0];return;}
   if(!activeHousehold){toast("Kein Haushalt aktiv.",true);return;}
-  importResults=[];importBusy=true;reviewDoc=null;activeView="add";renderApp();
-  var n=files.length;
+  importResults=[];importBusy=true;importCancel=false;reviewDoc=null;activeView="add";renderApp();
+  var n=files.length;importTotal=n;importDone=0;
   for(var i=0;i<n;i++){
+    if(importCancel)break;
+    importDone=i;
     showAiWork(n>1?("🎩 Dokument "+(i+1)+" von "+n+" wird gelesen …"):"🎩 Der Butler liest das Dokument … (ca. 10–30 Sek.)");
     try{await prepareAndIngest(files[i]);}
     catch(e){importResults.push({name:(files[i].name||"Datei"),icon:"⚠️",text:errMsg(e),view:null});}
   }
-  importBusy=false;hideAiWork();
+  var abgebrochen=importCancel;
+  importBusy=false;importCancel=false;hideAiWork();
   try{await loadFromDB();}catch(e){}
   activeView="add";renderApp();
-  if(importResults.length)toast(importResults.length+(importResults.length===1?" Dokument":" Dokumente")+" eingelesen ✅");
+  if(abgebrochen)toast("Abgebrochen – "+importResults.length+" von "+n+" schon eingelesen.");
+  else if(importResults.length)toast(importResults.length+(importResults.length===1?" Dokument":" Dokumente")+" eingelesen ✅");
 }
+function cancelImport(){if(importBusy){importCancel=true;toast("Wird nach dem aktuellen Dokument abgebrochen …");var b=$("#aiCancel");if(b){b.textContent="Wird abgebrochen …";b.disabled=true;}}}
 async function prepareAndIngest(file){
   if(isEmlFile(file))return prepareEmail(file);
   var isPdf=file.type==="application/pdf"||/\.pdf$/i.test(file.name||"");
@@ -706,7 +715,7 @@ async function ingest(opts){
   if(ins.error)throw ins.error;
   var docRow=ins.data,ext=null;
   try{
-    var reqBody=opts.textContent?{textContent:opts.textContent}:{fileBase64:await blobToBase64(opts.blob),mimeType:opts.mime};
+    var reqBody=opts.textContent?{textContent:opts.textContent,model:modelPref()}:{fileBase64:await blobToBase64(opts.blob),mimeType:opts.mime,model:modelPref()};
     var r=await sb.functions.invoke(EDGE_FN,{body:reqBody});
     if(r.error)throw r.error;
     var body=r.data||{};if(body.error)throw new Error(body.error);
@@ -900,7 +909,7 @@ function htmlToText(html){
   var ta=document.createElement("textarea");ta.innerHTML=s;s=ta.value;
   return s.replace(/[ \t]+/g," ").replace(/\n{3,}/g,"\n\n").trim();
 }
-function showAiWork(msg){var el=$("#aiWork");if(el){el.hidden=false;el.querySelector(".aimsg").textContent=msg;}}
+function showAiWork(msg){var el=$("#aiWork");if(el){el.hidden=false;el.querySelector(".aimsg").textContent=msg;var b=$("#aiCancel");if(b){b.hidden=(importTotal<=1);b.disabled=false;b.textContent="Abbrechen";}}}
 function hideAiWork(){var el=$("#aiWork");if(el)el.hidden=true;}
 function findMatch(ext){
   if(!ext)return null;
@@ -995,7 +1004,8 @@ function changeContractPersonUI(contractId){
 }
 
 /* ---------- Views ---------- */
-function go(view){activeView=view;if(view!=="contract-detail")detailId=null;renderApp();window.scrollTo({top:0,behavior:"smooth"});}
+var contractsCostSort=false;
+function go(view){activeView=view;if(view!=="contract-detail")detailId=null;if(view!=="contracts")contractsCostSort=false;renderApp();window.scrollTo({top:0,behavior:"smooth"});}
 function navItem(v,label,icon){return '<button class="tab'+(v===activeView?" active":"")+'" data-nav="'+v+'"><span class="tcon">'+icon+'</span>'+label+'</button>';}
 function renderTabs(){
   var items=navItem("dashboard","Übersicht","🏠")+navItem("contracts","Verträge","📑")+navItem("gesundheit","Gesundheit","🩺")+navItem("docs","Dokumente","📁")+navItem("add","Hinzufügen","➕");
@@ -1036,9 +1046,9 @@ function viewDashboard(){
   return '<button class="bigadd" data-nav="add">➕ &nbsp;Dokument hochladen oder fotografieren</button>'+
     personBar()+
     '<div class="kpis">'+
-      '<div class="kpi"><div class="klabel">Monatliche Kosten</div><div class="kval">'+fmtEur(mk)+'</div><div class="ksub">'+aktive.length+' aktive Verträge</div></div>'+
-      '<div class="kpi"><div class="klabel">Kosten pro Jahr</div><div class="kval">'+fmtEur(mk*12)+'</div><div class="ksub">laufende Verträge</div></div>'+
-      '<div class="kpi"><div class="klabel">Dokumente</div><div class="kval">'+DS.length+'</div><div class="ksub">im Archiv</div></div>'+
+      '<div class="kpi kpiclick" data-action="drill-costs"><div class="klabel">Monatliche Kosten ›</div><div class="kval">'+fmtEur(mk)+'</div><div class="ksub">'+aktive.length+' aktive Verträge</div></div>'+
+      '<div class="kpi kpiclick" data-action="drill-costs"><div class="klabel">Kosten pro Jahr ›</div><div class="kval">'+fmtEur(mk*12)+'</div><div class="ksub">laufende Verträge</div></div>'+
+      '<div class="kpi kpiclick" data-nav="docs"><div class="klabel">Dokumente ›</div><div class="kval">'+DS.length+'</div><div class="ksub">im Archiv</div></div>'+
     '</div>'+
     butlerTips(CS,DS)+
     '<section class="card"><h2 class="sect">⏰ Fristen im Blick</h2>'+fr+'</section>'+
@@ -1108,20 +1118,30 @@ function fristRow(c,f){
 /* ---- Verträge ---- */
 function viewContracts(){
   if(!CONTRACTS.length)return '<section class="card"><h2 class="sect">📑 Verträge</h2><p class="muted">Noch keine Verträge angelegt. Am schnellsten geht es, wenn du ein Vertrags-PDF oder einen Brief hochlädst – der Butler füllt alles aus.</p><div class="btnrow"><button class="primary" data-nav="add">➕ Dokument hochladen</button><button class="ghost" data-action="new-contract">Von Hand anlegen</button></div></section>';
-  /* intelligente Sortierung: dringendste Fristen zuerst, gekündigte/beendete ans Ende */
-  var sorted=filterPerson(CONTRACTS).slice().sort(function(a,b){
-    var rank={aktiv:0,gekuendigt:1,beendet:2};
-    var ra=rank[a.status]!=null?rank[a.status]:0,rb=rank[b.status]!=null?rank[b.status]:0;
-    if(ra!==rb)return ra-rb;
-    var fa=fristInfo(a),fb=fristInfo(b);
-    var oa=fa.days!=null?fa.days:(fa.kind==="flex"?99990:99999);
-    var ob=fb.days!=null?fb.days:(fb.kind==="flex"?99990:99999);
-    return oa-ob;
-  });
+  var base=filterPerson(CONTRACTS).slice();
+  var sorted;
+  if(contractsCostSort){
+    /* Kosten-Drilldown: teuerste laufende Verträge zuerst */
+    sorted=base.sort(function(a,b){return monatskosten(b)-monatskosten(a);});
+  }else{
+    /* intelligente Sortierung: dringendste Fristen zuerst, gekündigte/beendete ans Ende */
+    sorted=base.sort(function(a,b){
+      var rank={aktiv:0,gekuendigt:1,beendet:2};
+      var ra=rank[a.status]!=null?rank[a.status]:0,rb=rank[b.status]!=null?rank[b.status]:0;
+      if(ra!==rb)return ra-rb;
+      var fa=fristInfo(a),fb=fristInfo(b);
+      var oa=fa.days!=null?fa.days:(fa.kind==="flex"?99990:99999);
+      var ob=fb.days!=null?fb.days:(fb.kind==="flex"?99990:99999);
+      return oa-ob;
+    });
+  }
   var cards=sorted.map(function(c){
     var k=katInfo(c.kategorie),f=fristInfo(c);
     var nd=DOCS.filter(function(d){return d.contract_id===c.id;}).length;
-    var badge='<span class="badge '+f.level+'">'+(f.kind==="flex"?"jederzeit kündbar":(f.kind==="fest"?"Frist: "+fmtDate(f.lastDay):escapeHtml(f.label)))+'</span>';
+    var mkc=monatskosten(c);
+    var badge=contractsCostSort
+      ?(mkc>0?'<span class="ccost">'+fmtEur(mkc)+' <span class="muted">/ Mon.</span></span>':'<span class="badge gray">keine laufenden Kosten</span>')
+      :'<span class="badge '+f.level+'">'+(f.kind==="flex"?"jederzeit kündbar":(f.kind==="fest"?"Frist: "+fmtDate(f.lastDay):escapeHtml(f.label)))+'</span>';
     return '<div class="ccard" data-action="open-contract" data-id="'+c.id+'">'+
       '<div class="chead"><span class="cicon">'+k.icon+'</span><div><div class="cname">'+escapeHtml(c.anbieter||"?")+'</div><div class="csub">'+escapeHtml(c.produkt||k.label)+(nd?' · '+nd+' Dok.':"")+'</div></div></div>'+
       (c.person_id?'<div style="margin-top:8px">'+personBadge(c.person_id)+'</div>':"")+
@@ -1129,7 +1149,8 @@ function viewContracts(){
     '</div>';
   }).join("");
   var body=cards?('<div class="clist">'+cards+'</div>'):'<section class="card"><p class="muted">Keine Verträge für diese Person.</p></section>';
-  return personBar()+'<div class="btnrow" style="margin:0 0 16px"><button class="primary" data-nav="add">➕ Per Dokument</button><button class="ghost" data-action="new-contract">Von Hand anlegen</button></div>'+body;
+  var costBanner=contractsCostSort?('<div class="ainote" style="margin:0 0 12px">💶 Nach monatlichen Kosten sortiert (teuerste zuerst). <button class="linkbtn" data-nav="contracts" style="display:inline">Normale Ansicht</button></div>'):"";
+  return personBar()+costBanner+'<div class="btnrow" style="margin:0 0 16px"><button class="primary" data-nav="add">➕ Per Dokument</button><button class="ghost" data-action="new-contract">Von Hand anlegen</button></div>'+body;
 }
 function viewContractDetail(){
   var c=contractById(detailId);
@@ -1335,6 +1356,24 @@ async function setContractStatus(id,status){
   }catch(e){toast("Änderung fehlgeschlagen: "+errMsg(e),true);}
 }
 
+/* ---- Filter-/Sortier-Helfer (für alle Bereiche) ---- */
+function docSortDate(d){return String((isMed(d)?d.behandlungsdatum:d.doc_date)||d.doc_date||d.behandlungsdatum||d.created_at||"").slice(0,10);}
+function docYear(d){var s=docSortDate(d);return s?s.slice(0,4):"";}
+function yearsOf(list){var y={};list.forEach(function(d){var j=docYear(d);if(j)y[j]=1;});return Object.keys(y).sort().reverse();}
+function sortDocs(list,sort){
+  var l=list.slice();
+  if(sort==="name_asc")l.sort(function(a,b){return String(a.filename||"").localeCompare(String(b.filename||""));});
+  else if(sort==="date_asc")l.sort(function(a,b){return docSortDate(a).localeCompare(docSortDate(b));});
+  else l.sort(function(a,b){return docSortDate(b).localeCompare(docSortDate(a));}); /* date_desc default */
+  return l;
+}
+function sortOptions(cur){
+  var opts=[["date_desc","Neueste zuerst"],["date_asc","Älteste zuerst"],["name_asc","Name A–Z"]];
+  return opts.map(function(o){return '<option value="'+o[0]+'"'+(cur===o[0]?" selected":"")+'>↕ '+o[1]+'</option>';}).join("");
+}
+function yearOptions(list,cur){
+  return '<option value="">Alle Jahre</option>'+yearsOf(list).map(function(j){return '<option value="'+j+'"'+(cur===j?" selected":"")+'>'+j+'</option>';}).join("");
+}
 /* ---- Dokumente ---- */
 function docRow(d){
   var t=dtInfo(d.doc_type);
@@ -1365,19 +1404,24 @@ function medRow(d){
     '<button class="danger" data-action="doc-del" data-id="'+d.id+'">🗑️</button></div></div>';
 }
 function viewDocs(){
-  var kats={};DOCS.forEach(function(d){if(d.extracted&&d.extracted.kategorie)kats[d.extracted.kategorie]=1;});
+  var pool=filterPerson(DOCS).filter(function(d){return !isMed(d);});
+  var kats={};pool.forEach(function(d){if(d.extracted&&d.extracted.kategorie)kats[d.extracted.kategorie]=1;});
   var katOpts='<option value="">Alle Kategorien</option>'+Object.keys(kats).map(function(k){return '<option value="'+k+'"'+(docFilter.kat===k?" selected":"")+'>'+katInfo(k).icon+' '+katInfo(k).label+'</option>';}).join("");
-  var typOpts='<option value="">Alle Typen</option>'+Object.keys(DOCTYPE).map(function(k){return '<option value="'+k+'"'+(docFilter.typ===k?" selected":"")+'>'+DOCTYPE[k].label+'</option>';}).join("");
-  var list=filterPerson(DOCS).filter(function(d){
-    if(isMed(d))return false;
+  var typen={};pool.forEach(function(d){typen[d.doc_type||"sonstiges"]=1;});
+  var typOpts='<option value="">Alle Arten</option>'+Object.keys(DOCTYPE).filter(function(k){return typen[k];}).map(function(k){return '<option value="'+k+'"'+(docFilter.typ===k?" selected":"")+'>'+DOCTYPE[k].label+'</option>';}).join("");
+  var list=pool.filter(function(d){
     if(docFilter.typ&&d.doc_type!==docFilter.typ)return false;
     if(docFilter.kat&&!(d.extracted&&d.extracted.kategorie===docFilter.kat))return false;
+    if(docFilter.jahr&&docYear(d)!==docFilter.jahr)return false;
     if(docFilter.q){var q=docFilter.q.toLowerCase();var hay=((d.filename||"")+" "+(d.zusammenfassung||"")+" "+JSON.stringify(d.extracted||{})).toLowerCase();if(hay.indexOf(q)<0)return false;}
     return true;
   });
-  var rows=list.length?list.map(docRow).join(""):'<p class="muted">Keine Vertrags-/Haushaltsdokumente'+(DOCS.length?" für diesen Filter":"")+'. Arzt-Dokumente findest du unter 🩺 Gesundheit.</p>';
+  list=sortDocs(list,docFilter.sort);
+  var rows=list.length?list.map(docRow).join(""):'<p class="muted">Keine Vertrags-/Haushaltsdokumente'+(pool.length?" für diesen Filter":"")+'. Arzt-Dokumente findest du unter 🩺 Gesundheit.</p>';
+  var aktiv=(docFilter.kat||docFilter.typ||docFilter.jahr||docFilter.q);
   return personBar()+
-    '<div class="filterbar"><select id="df_kat">'+katOpts+'</select><select id="df_typ">'+typOpts+'</select><input type="text" id="df_q" placeholder="Suchen …" value="'+escapeHtml(docFilter.q)+'"></div>'+
+    '<div class="filterbar"><select id="df_kat">'+katOpts+'</select><select id="df_typ">'+typOpts+'</select><select id="df_jahr">'+yearOptions(pool,docFilter.jahr)+'</select><select id="df_sort">'+sortOptions(docFilter.sort)+'</select><input type="text" id="df_q" placeholder="🔎 Suchen …" value="'+escapeHtml(docFilter.q)+'">'+(aktiv?'<button class="ghost" data-action="df-reset">Filter zurücksetzen</button>':"")+'</div>'+
+    '<p class="muted" style="font-size:.82rem;margin:0 0 10px">'+list.length+' von '+pool.length+' Dokumenten</p>'+
     '<section class="card">'+rows+'</section>'+
     '<button class="bigadd" data-nav="add">➕ &nbsp;Weiteres Dokument hinzufügen</button>';
 }
@@ -1394,29 +1438,33 @@ function viewGesundheit(){
   var jahr=todayISO().slice(0,4);
   var kostenJahr=meds.reduce(function(s,d){var dt=(d.behandlungsdatum||d.doc_date||"");return (d.betrag!=null&&String(dt).slice(0,4)===jahr)?s+Number(d.betrag):s;},0);
   var kostenGesamt=meds.reduce(function(s,d){return d.betrag!=null?s+Number(d.betrag):s;},0);
-  /* Filter-Optionen aus vorhandenen Fachrichtungen/Typen */
-  var fachSet={},typSet={};meds.forEach(function(d){if(d.fachrichtung)fachSet[d.fachrichtung]=1;if(d.med_typ)typSet[d.med_typ]=1;});
+  /* Filter-Optionen aus vorhandenen Fachrichtungen/Typen/Ärzten */
+  var fachSet={},typSet={},arztSet={};meds.forEach(function(d){if(d.fachrichtung)fachSet[d.fachrichtung]=1;if(d.med_typ)typSet[d.med_typ]=1;if(d.arzt)arztSet[d.arzt]=1;});
   var fachOpts='<option value="">Alle Fachrichtungen</option>'+Object.keys(fachSet).map(function(f){return '<option value="'+f+'"'+(medFilter.fach===f?" selected":"")+'>'+fachInfo(f).icon+' '+fachInfo(f).label+'</option>';}).join("");
   var typOpts='<option value="">Alle Arten</option>'+Object.keys(typSet).map(function(tk){return '<option value="'+tk+'"'+(medFilter.typ===tk?" selected":"")+'>'+medTypInfo(tk).label+'</option>';}).join("");
+  var arztOpts='<option value="">Alle Ärzte/Praxen</option>'+Object.keys(arztSet).sort().map(function(a){return '<option value="'+escapeHtml(a)+'"'+(medFilter.arzt===a?" selected":"")+'>'+escapeHtml(a)+'</option>';}).join("");
   var filtered=meds.filter(function(d){
     if(medFilter.fach&&d.fachrichtung!==medFilter.fach)return false;
     if(medFilter.typ&&d.med_typ!==medFilter.typ)return false;
+    if(medFilter.arzt&&(d.arzt||"")!==medFilter.arzt)return false;
+    if(medFilter.jahr&&docYear(d)!==medFilter.jahr)return false;
     return true;
   });
-  /* nach Fachrichtung gruppieren, je Gruppe nach Datum absteigend */
+  /* nach Fachrichtung gruppieren, je Gruppe nach gewählter Sortierung */
   var groups={};
   filtered.forEach(function(d){var f=d.fachrichtung||"sonstiges";(groups[f]=groups[f]||[]).push(d);});
   var order=Object.keys(groups).sort(function(a,b){return fachInfo(a).label.localeCompare(fachInfo(b).label);});
   var body=order.map(function(f){
-    var fa=fachInfo(f),rows=groups[f].sort(function(a,b){return String(b.behandlungsdatum||b.doc_date||"").localeCompare(String(a.behandlungsdatum||a.doc_date||""));});
+    var fa=fachInfo(f),rows=sortDocs(groups[f],medFilter.sort);
     var sum=rows.reduce(function(s,d){return d.betrag!=null?s+Number(d.betrag):s;},0);
     return '<div class="medgroup"><div class="medghead">'+fa.icon+' '+escapeHtml(fa.label)+' <span class="fcount">· '+rows.length+' Dok.'+(sum>0?' · '+fmtEur(sum):"")+'</span></div>'+
       '<section class="card" style="padding:8px 16px">'+rows.map(medRow).join("")+'</section></div>';
   }).join("");
   var kpi='<div class="kpis"><div class="kpi"><div class="klabel">Arztkosten '+jahr+'</div><div class="kval">'+fmtEur(kostenJahr)+'</div><div class="ksub">'+meds.length+' Dokumente</div></div>'+
     '<div class="kpi"><div class="klabel">Kosten gesamt</div><div class="kval">'+fmtEur(kostenGesamt)+'</div><div class="ksub">erfasst</div></div></div>';
+  var aktiv=(medFilter.fach||medFilter.typ||medFilter.arzt||medFilter.jahr);
   return personBar()+kpi+
-    '<div class="medfilter"><select id="mf_fach">'+fachOpts+'</select><select id="mf_typ">'+typOpts+'</select></div>'+
+    '<div class="medfilter"><select id="mf_fach">'+fachOpts+'</select><select id="mf_arzt">'+arztOpts+'</select><select id="mf_typ">'+typOpts+'</select><select id="mf_jahr">'+yearOptions(meds,medFilter.jahr)+'</select><select id="mf_sort">'+sortOptions(medFilter.sort)+'</select>'+(aktiv?'<button class="ghost" data-action="mf-reset">Filter zurücksetzen</button>':"")+'</div>'+
     (filtered.length?body:'<section class="card"><p class="muted">Keine Dokumente für diesen Filter.</p></section>')+
     '<button class="bigadd" data-nav="add">➕ &nbsp;Arzt-Dokument hinzufügen</button>';
 }
@@ -1600,7 +1648,7 @@ function viewAdd(){
   '</div>'+
   '<input type="file" id="fileCam" accept="image/*" capture="environment" hidden>'+
   '<input type="file" id="filePick" accept="application/pdf,image/*,message/rfc822,.eml" multiple hidden>'+
-  '<div id="aiWork" class="aiwork" hidden><span class="spin"></span><span class="aimsg">…</span></div>'+
+  '<div id="aiWork" class="aiwork" hidden><span class="spin"></span><span class="aimsg">…</span><button class="ghost" id="aiCancel" data-action="cancel-import" style="margin-left:auto;flex:none">Abbrechen</button></div>'+
   '<p class="muted" style="font-size:.8rem;margin-top:14px">🔒 Deine Dokumente liegen verschlüsselt in deinem privaten Speicher und sind nur für deinen Haushalt sichtbar. Die KI-Analyse kostet weniger als 1 Cent pro Dokument.</p>'+
   '</section>';
 }
@@ -1642,6 +1690,7 @@ function viewSettings(){
     '<p class="muted" style="font-size:.9rem">Speicher belegt: <b>'+mb+'</b> ('+DOCS.length+(DOCS.length===1?" Dokument":" Dokumente")+')</p>'+
     '<div class="btnrow"><button class="ghost" data-action="export-json">⬇️ Vertragsdaten exportieren (JSON)</button></div>'+
   '</section>'+
+  modelCard()+
   gdriveCard()+
   securityCard()+
   '<section class="card"><h2 class="sect">ℹ️ Wie rechnet der Butler?</h2>'+
@@ -1649,6 +1698,17 @@ function viewSettings(){
   '</section>'+
   '<button class="danger" data-action="logout" style="width:100%;padding:13px">Abmelden</button>';
 }
+function modelCard(){
+  var m=modelPref();
+  function opt(val,label,desc){return '<button class="hhopt'+(m===val?" active":"")+'" data-action="set-model" data-val="'+val+'" style="text-align:left;align-items:flex-start"><span style="flex:1"><span class="hhname">'+label+'</span><br><span class="muted" style="font-size:.8rem;font-weight:400">'+desc+'</span></span><span class="hhtag">'+(m===val?"✓ aktiv":"wählen")+'</span></button>';}
+  return '<section class="card"><h2 class="sect">🧠 KI-Modell</h2>'+
+    '<p class="muted" style="font-size:.9rem;margin-bottom:10px">Womit der Butler deine Dokumente ausliest – jederzeit umstellbar.</p>'+
+    '<div class="hhlist">'+
+    opt("basic","Basis · schnell","Zügig und günstig – für die allermeisten Dokumente völlig ausreichend.")+
+    opt("advanced","Fortgeschritten · genauer","Etwas langsamer, liest knifflige oder unübersichtliche Dokumente sorgfältiger.")+
+    '</div></section>';
+}
+function setModel(val){try{localStorage.setItem("db_model",val==="advanced"?"advanced":"basic");}catch(e){}if(activeView==="settings")renderApp();toast(val==="advanced"?"KI-Modell: Fortgeschritten ✅":"KI-Modell: Basis ✅");}
 function exportJSON(){
   var data={exportiert:new Date().toISOString(),haushalt:activeHouseholdName(),contracts:CONTRACTS,documents:DOCS.map(function(d){var x={};for(var k in d)if(k!=="extracted")x[k]=d[k];return x;})};
   var blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
@@ -2095,6 +2155,10 @@ function onAppClick(e){
   else if(act==="med-save")onSaveMed();
   else if(act==="med-tovertrag")fromMedical(id);
   else if(act==="review-med-done"){reviewDoc=null;go("gesundheit");toast("Im Gesundheitsbereich abgelegt ✅");}
+  else if(act==="cancel-import")cancelImport();
+  else if(act==="drill-costs"){contractsCostSort=true;activeView="contracts";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
+  else if(act==="df-reset"){docFilter={kat:"",typ:"",q:"",jahr:"",sort:"date_desc"};renderApp();}
+  else if(act==="mf-reset"){medFilter={fach:"",typ:"",arzt:"",jahr:"",sort:"date_desc"};renderApp();}
   else if(act==="import-more"){importResults=[];reviewDoc=null;renderApp();}
   else if(act==="import-open"){var r=importResults[parseInt(b.dataset.i,10)];if(!r)return;importResults=[];if(r.view==="contract-detail"&&r.id){detailId=r.id;activeView="contract-detail";}else if(r.view){activeView=r.view;}else{activeView="docs";}renderApp();window.scrollTo({top:0,behavior:"smooth"});}
   else if(act==="pick-cam"){if(isNative())nativeCameraScan();else{var fc=$("#fileCam");if(fc)fc.click();}}
@@ -2127,6 +2191,7 @@ function onAppClick(e){
   else if(act==="pin-remove"){if(confirm("PIN wirklich entfernen? Die App ist dann ohne Sperre zugänglich.")){removePin();renderApp();toast("PIN entfernt");}}
   else if(act==="gd-save")saveGdriveConfig();
   else if(act==="gd-import")gdriveImport();
+  else if(act==="set-model")setModel(b.dataset.val);
   else if(act==="acc-change-pass")changeAccountPassword();
   else if(act==="logout")doLogout();
 }
@@ -2155,8 +2220,13 @@ function onAppChange(e){
   }
   else if(e.target.id==="df_kat"){docFilter.kat=e.target.value;renderApp();}
   else if(e.target.id==="df_typ"){docFilter.typ=e.target.value;renderApp();}
+  else if(e.target.id==="df_jahr"){docFilter.jahr=e.target.value;renderApp();}
+  else if(e.target.id==="df_sort"){docFilter.sort=e.target.value;renderApp();}
   else if(e.target.id==="mf_fach"){medFilter.fach=e.target.value;renderApp();}
   else if(e.target.id==="mf_typ"){medFilter.typ=e.target.value;renderApp();}
+  else if(e.target.id==="mf_arzt"){medFilter.arzt=e.target.value;renderApp();}
+  else if(e.target.id==="mf_jahr"){medFilter.jahr=e.target.value;renderApp();}
+  else if(e.target.id==="mf_sort"){medFilter.sort=e.target.value;renderApp();}
   else if(e.target.id==="bioToggle"){toggleBiometric(e.target.checked);}
 }
 function onAppInput(e){
