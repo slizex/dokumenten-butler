@@ -570,21 +570,24 @@ function icsEsc(s){return String(s).replace(/\\/g,"\\\\").replace(/;/g,"\\;").re
 /* ---------- Datenzugriff ---------- */
 async function loadFromDB(){
   if(!activeHousehold){CONTRACTS=[];DOCS=[];PERSONS=[];return;}
-  var rp=await sb.from("persons").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:true});
-  PERSONS=(rp&&!rp.error&&rp.data)?rp.data:[];
-  var rc=await sb.from("contracts").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:false});
-  if(rc.error)throw rc.error;
-  CONTRACTS=rc.data||[];
-  var rd=await sb.from("documents").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:false});
-  if(rd.error)throw rd.error;
-  DOCS=rd.data||[];
+  /* alle drei Tabellen parallel laden (eine Runde statt drei) */
+  var res=await Promise.all([
+    sb.from("persons").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:true}),
+    sb.from("contracts").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:false}),
+    sb.from("documents").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:false})
+  ]);
+  PERSONS=(res[0]&&!res[0].error&&res[0].data)?res[0].data:[];
+  if(res[1].error)throw res[1].error;
+  CONTRACTS=res[1].data||[];
+  if(res[2].error)throw res[2].error;
+  DOCS=res[2].data||[];
   if(activePerson&&!PERSONS.some(function(p){return p.id===activePerson;}))activePerson="";
 }
 function contractById(id){return CONTRACTS.find(function(c){return c.id===id;})||null;}
 
 /* ---------- Personen / Mandanten ---------- */
 function personById(id){return PERSONS.find(function(p){return p.id===id;})||null;}
-function personColor(p){return (p&&p.farbe)?p.farbe:"#71717a";}
+function personColor(p){var f=(p&&p.farbe)||"";return /^#[0-9a-fA-F]{3,8}$/.test(f)?f:"#71717a";}
 function normName(s){return String(s||"").trim().toLowerCase().replace(/\s+/g," ");}
 function matchPerson(name){
   var n=normName(name);if(!n)return null;
@@ -709,6 +712,7 @@ async function processFiles(files){
   if(!files.length)return;
   if(!currentUser){pendingSharedFile=files[0];return;}
   if(!activeHousehold){toast("Kein Haushalt aktiv.",true);return;}
+  if(importBusy){toast("Es läuft bereits ein Import – bitte warten oder abbrechen.",true);return;}
   importResults=[];importBusy=true;importCancel=false;reviewDoc=null;activeView="add";renderApp();
   var n=files.length;importTotal=n;importDone=0;
   for(var i=0;i<n;i++){
@@ -848,7 +852,6 @@ function importSummaryCard(){
     items+
     '<div class="btnrow"><button class="primary" data-action="import-more">➕ Weitere hochladen</button><button class="ghost" data-nav="dashboard">Fertig</button></div></section>';
 }
-function blobToBase64(blob){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){var s=String(r.result||"");var i=s.indexOf(",");res(i>=0?s.slice(i+1):s);};r.onerror=function(){rej(new Error("Datei konnte nicht gelesen werden."));};r.readAsDataURL(blob);});}
 
 /* ---------- Minimaler MIME-/E-Mail-Parser (clientseitig) ---------- */
 function parseEml(raw){
