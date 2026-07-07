@@ -205,6 +205,12 @@ textarea{min-height:74px;resize:vertical}
 .invdelta{font-size:.78rem;font-weight:600;margin-left:8px}
 .invdelta.up{color:var(--neg)}.invdelta.down{color:var(--pos)}.invdelta.same{color:var(--muted2)}
 .invmini{display:flex;align-items:flex-end;gap:3px;height:34px;margin:6px 0 2px}
+.yearcmp{margin:4px 0 10px;padding:4px 0;border-bottom:1px solid var(--border)}
+.yrow{display:flex;align-items:center;gap:10px;padding:7px 0;border-bottom:1px solid var(--border);font-size:.9rem;flex-wrap:wrap}
+.yrow:last-child{border-bottom:none}
+.yrow b{flex:none;min-width:3.4em}
+.yrow>span:not(.invdelta){color:var(--muted)}
+.yrow .invdelta{margin-left:auto}
 .invmini .imb{flex:1;background:color-mix(in srgb,var(--accent) 40%,transparent);border-radius:2px 2px 0 0;min-height:3px}
 
 /* ---- Gesundheit ---- */
@@ -1112,16 +1118,28 @@ function butlerTips(CS,DS){
       tips.push({txt:'„'+escapeHtml(c.anbieter||"?")+'“ war zum '+fmtDate(c.gekuendigt_zum)+' gekündigt und ist inzwischen abgelaufen.',btn:"Als beendet markieren",action:"tip-ended",id:c.id});
   });
   /* Rechnungs-Trend: letzte Rechnung deutlich teurer als die davor */
+  var trendIds={};
   CS.forEach(function(c){
     if(c.status!=="aktiv")return;
-    var invs=DS.filter(function(d){return d.contract_id===c.id&&d.doc_type==="rechnung"&&d.extracted&&d.extracted.betrag!=null;})
-      .map(function(d){return {b:Number(d.extracted.betrag),date:invoiceDate(d)};})
-      .sort(function(a,b){return String(a.date).localeCompare(String(b.date));});
+    var invs=contractInvoices(c.id,DS);
     if(invs.length>=2){
       var last=invs[invs.length-1].b,prev=invs[invs.length-2].b;
-      if(last>prev&&(last-prev)>Math.max(1,prev*0.05))
+      if(last>prev&&(last-prev)>Math.max(1,prev*0.05)){
+        trendIds[c.id]=1;
         tips.push({txt:'Die letzte Rechnung von „'+escapeHtml(c.anbieter||"?")+'“ ist um '+fmtEur(last-prev)+' höher als die davor ('+fmtEur(prev)+' → '+fmtEur(last)+').',btn:"Verlauf ansehen",action:"open-contract",id:c.id});
+      }
     }
+  });
+  /* Jahresvergleich: Vertrag ist im Schnitt teurer als im Vorjahr (nur wenn kein Trend-Tipp dazu) */
+  CS.forEach(function(c){
+    if(c.status!=="aktiv"||trendIds[c.id])return;
+    var ys=invoiceYears(contractInvoices(c.id,DS));
+    var yk=Object.keys(ys).sort();
+    if(yk.length<2)return;
+    var cur=ys[yk[yk.length-1]],prev=ys[yk[yk.length-2]];
+    var aC=cur.sum/cur.n,aP=prev.sum/prev.n;
+    if(aC>aP&&(aC-aP)>Math.max(1,aP*0.05))
+      tips.push({txt:'„'+escapeHtml(c.anbieter||"?")+'“ kostet '+yk[yk.length-1]+' im Schnitt '+fmtEur(aC-aP)+' mehr je Rechnung als '+yk[yk.length-2]+' (⌀ '+fmtEur(aP)+' → ⌀ '+fmtEur(aC)+').',btn:"Jahresvergleich",action:"open-contract",id:c.id});
   });
   var unlinked=DS.filter(function(d){return !isMed(d)&&!d.contract_id&&["vertrag","rechnung","police","preisaenderung","kuendigung"].indexOf(d.doc_type)>=0;}).length;
   if(unlinked)tips.push({txt:unlinked+(unlinked===1?" Dokument ist":" Dokumente sind")+" noch keinem Vertrag zugeordnet – zugeordnet findet der Butler sie schneller wieder.",btn:"Ansehen",nav:"docs"});
@@ -1164,6 +1182,49 @@ function costByPerson(){
   return '<section class="card"><h2 class="sect">👥 Monatskosten nach Person</h2>'+entries.map(function(e){
     return '<div class="kcat"><span class="kcl"><span class="pdot" style="background:'+e.color+';display:inline-block;margin-right:6px"></span>'+escapeHtml(e.name)+'</span><span class="kbarw"><span class="kbar" style="width:'+Math.max(4,Math.round(e.val/max*100))+'%"></span></span><span class="kcv">'+fmtEur(e.val)+'</span></div>';
   }).join("")+'</section>';
+}
+/* Jahresvergleich über alle Verträge (nur im Kosten-Drilldown): Summe je Jahr + größte Preistreiber */
+function jahresvergleichCard(){
+  var DS=filterPerson(DOCS);
+  var perYear={},perContract={};
+  DS.forEach(function(d){
+    if(isMed(d)||d.doc_type!=="rechnung")return;
+    var e=d.extracted||{};if(e.betrag==null)return;
+    var j=String(invoiceDate(d)).slice(0,4);if(!/^\d{4}$/.test(j))return;
+    if(!perYear[j])perYear[j]={sum:0,n:0};
+    perYear[j].sum+=Number(e.betrag);perYear[j].n++;
+    if(d.contract_id){
+      if(!perContract[d.contract_id])perContract[d.contract_id]={};
+      if(!perContract[d.contract_id][j])perContract[d.contract_id][j]={sum:0,n:0};
+      perContract[d.contract_id][j].sum+=Number(e.betrag);perContract[d.contract_id][j].n++;
+    }
+  });
+  var years=Object.keys(perYear).sort().reverse();
+  if(years.length<2)return "";
+  var heuteJahr=todayISO().slice(0,4);
+  var rows=years.map(function(j,idx){
+    var s=perYear[j],prev=perYear[years[idx+1]],delta="";
+    if(prev)delta=deltaBadge(s.sum-prev.sum,fmtEur(Math.abs(s.sum-prev.sum))+" vs. "+years[idx+1]);
+    return '<div class="yrow"><b>'+j+(j===heuteJahr?'<span class="muted" style="font-weight:400"> (läuft)</span>':"")+'</b><span>'+fmtEur(s.sum)+' · '+s.n+' Rechnung'+(s.n===1?"":"en")+'</span>'+delta+'</div>';
+  }).join("");
+  /* größte Veränderungen je Vertrag (⌀ je Rechnung, aktuelles vs. vorheriges Jahr) */
+  var cur=years[0],prev=years[1],movers=[];
+  Object.keys(perContract).forEach(function(cid){
+    var y=perContract[cid];if(!y[cur]||!y[prev])return;
+    var aC=y[cur].sum/y[cur].n,aP=y[prev].sum/y[prev].n;
+    if(Math.abs(aC-aP)<0.01)return;
+    var c=contractById(cid);if(!c)return;
+    movers.push({name:(c.anbieter||"?")+(c.produkt?" · "+c.produkt:""),id:cid,d:aC-aP,aC:aC,aP:aP});
+  });
+  movers.sort(function(a,b){return Math.abs(b.d)-Math.abs(a.d);});
+  var mv="";
+  if(movers.length){
+    mv='<p class="muted" style="font-size:.82rem;margin:12px 0 4px;font-weight:600">Größte Veränderungen ('+cur+' vs. '+prev+', ⌀ je Rechnung)</p>'+
+      movers.slice(0,3).map(function(m){
+        return '<div class="yrow" data-action="open-contract" data-id="'+m.id+'" style="cursor:pointer"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+escapeHtml(m.name)+'</span>'+deltaBadge(m.d,fmtEur(Math.abs(m.d))+" ("+fmtPct(m.aP?m.d/m.aP*100:0)+")")+'</div>';
+      }).join("");
+  }
+  return '<section class="card"><h2 class="sect">📊 Rechnungen im Jahresvergleich</h2>'+rows+mv+'</section>';
 }
 function fristRow(c,f){
   var k=katInfo(c.kategorie);
@@ -1211,7 +1272,7 @@ function viewContracts(){
   var body=cards?('<div class="clist">'+cards+'</div>'):'<section class="card"><p class="muted">Keine Verträge für diese Person.</p></section>';
   var costBanner=contractsCostSort?('<div class="ainote" style="margin:0 0 12px">💶 Nach monatlichen Kosten sortiert (teuerste zuerst). <button class="linkbtn" data-nav="contracts" style="display:inline">Normale Ansicht</button></div>'):"";
   /* Kosten-Aufschlüsselungen leben im Kosten-Drilldown (Dashboard bleibt schlank) */
-  var costCards=contractsCostSort?(costByPerson()+costBreakdown(base)):"";
+  var costCards=contractsCostSort?(costByPerson()+costBreakdown(base)+jahresvergleichCard()):"";
   return personBar()+costBanner+costCards+'<div class="btnrow" style="margin:0 0 16px"><button class="primary" data-nav="add">➕ Per Dokument</button><button class="ghost" data-action="new-contract">Von Hand anlegen</button></div>'+body;
 }
 function viewContractDetail(){
@@ -1266,6 +1327,29 @@ function invoiceDate(d){
   var e=d.extracted||{};
   return e.zeitraumBis||e.zeitraumVon||d.doc_date||e.datum||String(d.created_at).slice(0,10);
 }
+/* Rechnungen eines Vertrags mit Betrag, zeitlich sortiert */
+function contractInvoices(cid,DS){
+  return DS.filter(function(d){return d.contract_id===cid&&d.doc_type==="rechnung"&&d.extracted&&d.extracted.betrag!=null;})
+    .map(function(d){return {b:Number(d.extracted.betrag),date:invoiceDate(d)};})
+    .sort(function(a,b){return String(a.date).localeCompare(String(b.date));});
+}
+/* Beträge nach Jahr aufsummieren: {jahr:{sum,n}} */
+function invoiceYears(invs){
+  var y={};
+  invs.forEach(function(i){
+    if(i.b==null)return;
+    var j=String(i.date).slice(0,4);if(!/^\d{4}$/.test(j))return;
+    if(!y[j])y[j]={sum:0,n:0};
+    y[j].sum+=i.b;y[j].n++;
+  });
+  return y;
+}
+function fmtPct(v){return (v>0?"+":"")+v.toLocaleString("de-DE",{maximumFractionDigits:1})+" %";}
+function deltaBadge(d,txt){
+  var cls=d>0.005?"up":(d<-0.005?"down":"same");
+  var arrow=d>0.005?"▲":(d<-0.005?"▼":"■");
+  return '<span class="invdelta '+cls+'">'+arrow+' '+txt+'</span>';
+}
 function invoiceHistory(c){
   var invs=DOCS.filter(function(d){return d.contract_id===c.id&&d.doc_type==="rechnung";})
     .map(function(d){var e=d.extracted||{};return {doc:d,betrag:(e.betrag!=null?Number(e.betrag):null),von:e.zeitraumVon||null,bis:e.zeitraumBis||null,date:invoiceDate(d)};})
@@ -1279,6 +1363,21 @@ function invoiceHistory(c){
   }
   var sum=withBetrag.reduce(function(s,i){return s+i.betrag;},0);
   var avg=withBetrag.length?sum/withBetrag.length:null;
+  /* Jahresvergleich: Summe/Anzahl/Durchschnitt je Jahr, Delta auf den Schnitt (fair bei laufendem Jahr) */
+  var ys=invoiceYears(withBetrag.map(function(i){return {b:i.betrag,date:i.date};}));
+  var yKeys=Object.keys(ys).sort().reverse();
+  var yBlock="";
+  if(yKeys.length>=2){
+    var heuteJahr=todayISO().slice(0,4);
+    yBlock='<div class="yearcmp">'+yKeys.map(function(j,idx){
+      var s=ys[j],prev=ys[yKeys[idx+1]],delta="";
+      if(prev){
+        var aC=s.sum/s.n,aP=prev.sum/prev.n,d=aC-aP;
+        delta=deltaBadge(d,fmtEur(Math.abs(d))+" je Rechnung ("+fmtPct(aP?d/aP*100:0)+")");
+      }
+      return '<div class="yrow"><b>'+j+(j===heuteJahr?'<span class="muted" style="font-weight:400"> (läuft)</span>':"")+'</b><span>'+fmtEur(s.sum)+' · '+s.n+' Rechnung'+(s.n===1?"":"en")+' · ⌀ '+fmtEur(s.sum/s.n)+'</span>'+delta+'</div>';
+    }).join("")+'</div>';
+  }
   var rows=invs.slice().reverse().map(function(i,idx,arr){
     var e=i.doc.extracted||{};
     var per=(i.von&&i.bis)?(fmtDate(i.von)+" – "+fmtDate(i.bis)):(i.bis?("bis "+fmtDate(i.bis)):fmtDate(i.date));
@@ -1296,7 +1395,7 @@ function invoiceHistory(c){
       '<button class="ghost" data-action="doc-view" data-id="'+i.doc.id+'" style="flex:none;font-size:.8rem;padding:6px 10px">👁️</button></div>';
   }).join("");
   var head=withBetrag.length?('<p class="muted" style="font-size:.85rem;margin:0 0 6px">'+withBetrag.length+' Rechnungen'+(avg!=null?' · ⌀ '+fmtEur(avg):"")+' · gesamt '+fmtEur(sum)+'</p>'):"";
-  return '<section class="card"><h2 class="sect">🧾 Monatsrechnungen</h2>'+head+mini+rows+'</section>';
+  return '<section class="card"><h2 class="sect">🧾 Monatsrechnungen</h2>'+head+yBlock+mini+rows+'</section>';
 }
 
 /* ---- Vertragsformular ---- */
