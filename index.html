@@ -765,18 +765,47 @@ async function prepareEmail(file){
 /* Einzeldatei (native Kamera, Teilen, Drive) laufen über denselben Weg */
 function onAddFile(file){return processFiles([file]);}
 
+/* Netzwerk-Helfer: die Android-WebView scheitert beim Streamen großer File-Objekte
+   ("Failed to fetch"); wir lesen die Datei in einen festen Puffer und wiederholen bei Netzfehlern. */
+function sleep(ms){return new Promise(function(r){setTimeout(r,ms);});}
+function isNetErr(e){var m=errMsg(e).toLowerCase();return m.indexOf("failed to fetch")>=0||m.indexOf("load failed")>=0||m.indexOf("network")>=0||m.indexOf("err_")>=0||m.indexOf("timeout")>=0;}
+function netErrText(e){return isNetErr(e)?"Netzwerkfehler beim Hochladen – bitte Internetverbindung prüfen und noch einmal versuchen.":errMsg(e);}
+async function uploadWithRetry(path,body,mime){
+  var last=null;
+  for(var a=0;a<3;a++){
+    if(a)await sleep(700*a);
+    try{
+      var up=await sb.storage.from(BUCKET).upload(path,body,{contentType:mime,upsert:false});
+      if(!up.error)return up;
+      if(a>0&&/exist|dupli|409/i.test(errMsg(up.error)))return {data:{path:path},error:null}; /* vorheriger Versuch war doch erfolgreich */
+      last=up.error;
+      if(!isNetErr(up.error))return up; /* echte Fehler (kein Netz) nicht wiederholen */
+    }catch(e){last=e;if(!isNetErr(e))return {error:e};}
+  }
+  return {error:last};
+}
+/* Uint8Array → base64 (chunked, verträgt große Dateien ohne Stack-Überlauf) */
+function bytesToBase64(bytes){
+  var bin="",chunk=0x8000;
+  for(var i=0;i<bytes.length;i+=chunk){bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+chunk));}
+  return btoa(bin);
+}
 /* Kern: ablegen, KI, speichern, dann automatisch einsortieren. Gibt ein Ergebnis zurück. */
 async function ingest(opts){
   var safe=(opts.fname||"dokument").replace(/[^\wäöüÄÖÜß.\-]+/g,"_").slice(-80);
   var path=activeHousehold+"/"+Date.now()+"_"+Math.random().toString(36).slice(2,7)+"_"+safe;
-  var up=await sb.storage.from(BUCKET).upload(path,opts.blob,{contentType:opts.mime,upsert:false});
-  if(up.error)throw up.error;
+  /* Datei EINMAL in einen festen Puffer lesen – stabiler in der Android-WebView als das Streamen des File-Objekts */
+  var bytes;
+  try{bytes=new Uint8Array(await opts.blob.arrayBuffer());}
+  catch(e){throw new Error("Datei konnte nicht gelesen werden. Bitte erneut versuchen.");}
+  var up=await uploadWithRetry(path,bytes,opts.mime);
+  if(up.error)throw new Error(netErrText(up.error));
   var note=opts.emailSubject?("Aus E-Mail: "+opts.emailSubject):(opts.emailFrom?"Aus E-Mail-Anhang":null);
-  var ins=await sb.from("documents").insert({household_id:activeHousehold,filename:opts.fname,storage_path:path,mime_type:opts.mime,size_bytes:opts.blob.size,doc_type:"sonstiges",note:note}).select("*").single();
-  if(ins.error)throw ins.error;
+  var ins=await sb.from("documents").insert({household_id:activeHousehold,filename:opts.fname,storage_path:path,mime_type:opts.mime,size_bytes:bytes.length,doc_type:"sonstiges",note:note}).select("*").single();
+  if(ins.error)throw new Error(netErrText(ins.error));
   var docRow=ins.data,ext=null;
   try{
-    var reqBody=opts.textContent?{textContent:opts.textContent,model:modelPref()}:{fileBase64:await blobToBase64(opts.blob),mimeType:opts.mime,model:modelPref()};
+    var reqBody=opts.textContent?{textContent:opts.textContent,model:modelPref()}:{fileBase64:bytesToBase64(bytes),mimeType:opts.mime,model:modelPref()};
     var r=await sb.functions.invoke(EDGE_FN,{body:reqBody});
     if(r.error)throw r.error;
     var body=r.data||{};if(body.error)throw new Error(body.error);
