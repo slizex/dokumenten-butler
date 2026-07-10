@@ -284,6 +284,7 @@ body.app-hidden .shell{display:none}
 
 /* ---- Modal (Dialog / Bottom-Sheet) ---- */
 .modalwrap{position:fixed;inset:0;background:rgba(8,11,20,.45);backdrop-filter:blur(3px);-webkit-backdrop-filter:blur(3px);z-index:150;display:flex;align-items:center;justify-content:center;padding:18px}
+body.modal-open{overflow:hidden}
 .modalbox{background:var(--panel);border:1px solid var(--border);border-radius:18px;max-width:560px;width:100%;max-height:86vh;overflow-y:auto;padding:22px;box-shadow:var(--shadow-lg)}
 .modalbox .sect{margin-bottom:10px}
 .pickrow{display:flex;align-items:center;gap:11px;width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:11px;background:var(--panel);color:var(--fg);font:inherit;cursor:pointer;text-align:left;margin:0 0 8px}
@@ -589,6 +590,18 @@ async function loadFromDB(){
   if(res[2].error)throw res[2].error;
   DOCS=res[2].data||[];
   if(activePerson&&!PERSONS.some(function(p){return p.id===activePerson;}))activePerson="";
+  lastLoad=Date.now();
+}
+/* Automatisch aktualisieren, wenn der User in die App zurückkehrt (Handy-Resume / Tab-Wechsel).
+   Nur in Übersichts-Ansichten – niemals mitten in einem Formular oder Dialog. */
+var lastLoad=0;
+function refreshIfStale(){
+  if(!currentUser||!activeHousehold)return;
+  if(Date.now()-lastLoad<300000)return; /* frischer als 5 Min → nichts tun */
+  if(importBusy||saveBusy)return;
+  if(activeView==="contract-form"||activeView==="med-form"||activeView==="add")return;
+  var mw=$("#modal");if(mw&&!mw.hidden)return;
+  loadFromDB().then(function(){renderApp();}).catch(function(e){});
 }
 function contractById(id){return CONTRACTS.find(function(c){return c.id===id;})||null;}
 
@@ -861,7 +874,9 @@ async function autoFileDoc(docId,ext){
     var fa=fachInfo(d.fachrichtung||"sonstiges");
     return {name:name,icon:fa.icon,text:"Gesundheit · "+fa.label+(d.med_typ?" · "+medTypInfo(d.med_typ).label:"")+(d.betrag!=null?" · "+fmtEur(d.betrag):""),view:"gesundheit"};
   }
-  var match=ext?findMatch(ext):null;
+  /* fester Ziel-Vertrag ("Dokument zu diesem Vertrag") hat Vorrang vor dem KI-Matching */
+  var match=uploadTarget?contractById(uploadTarget):null;
+  if(!match)match=ext?findMatch(ext):null;
   if(match){
     await linkDocSilent(d.id,match.id);
     var notes=[];
@@ -1083,7 +1098,8 @@ async function reviewCreatePerson(name){
 
 /* ---------- Views ---------- */
 var contractsCostSort=false,tipsExpanded=false;
-function go(view){activeView=view;if(view!=="contract-detail")detailId=null;if(view!=="contracts")contractsCostSort=false;tipsExpanded=false;renderApp();window.scrollTo({top:0,behavior:"smooth"});}
+var uploadTarget=null; /* Vertrag, dem neue Uploads fest zugeordnet werden ("Dokument zu diesem Vertrag") */
+function go(view){activeView=view;if(view!=="contract-detail")detailId=null;if(view!=="contracts")contractsCostSort=false;if(view!=="add")uploadTarget=null;tipsExpanded=false;renderApp();window.scrollTo({top:0,behavior:"smooth"});}
 function navItem(v,label,icon){return '<button class="tab'+(v===activeView?" active":"")+'" data-nav="'+v+'"><span class="tcon">'+icon+'</span>'+label+'</button>';}
 function renderTabs(){
   var items=navItem("dashboard","Übersicht","🏠")+navItem("contracts","Verträge","📑")+navItem("gesundheit","Gesundheit","🩺")+navItem("docs","Dokumente","📁")+navItem("add","Hinzufügen","➕");
@@ -1352,7 +1368,8 @@ function viewContractDetail(){
       '<button class="danger" data-action="del-contract" data-id="'+c.id+'">🗑️ Löschen</button>'+
     '</div></section>'+
     invoiceHistory(c)+
-    '<section class="card"><h2 class="sect">📁 Dokumente zu diesem Vertrag</h2>'+docsHtml+'</section>';
+    '<section class="card"><h2 class="sect">📁 Dokumente zu diesem Vertrag</h2>'+docsHtml+
+    '<div class="btnrow"><button class="ghost" data-action="add-for-contract" data-id="'+c.id+'">➕ Dokument zu diesem Vertrag hinzufügen</button></div></section>';
 }
 function dRow(k,v){return '<span class="dk">'+k+'</span><span class="dv">'+v+'</span>';}
 /* Monatsrechnungen: aus zugeordneten Rechnungs-Dokumenten Verlauf + Trend bauen */
@@ -1840,12 +1857,14 @@ function viewAdd(){
     }
   }
   var personHint=(activePerson&&personById(activePerson))?'<div class="ainote">👤 Neue Dokumente werden automatisch <b>'+escapeHtml(personById(activePerson).name)+'</b> zugeordnet (aktiver Personen-Filter).</div>':"";
+  var tCon=uploadTarget?contractById(uploadTarget):null;
+  var targetHint=tCon?('<div class="ainote">📎 Neue Dokumente werden dem Vertrag <b>'+katInfo(tCon.kategorie).icon+' '+escapeHtml(tCon.anbieter||"?")+(tCon.produkt?" – "+escapeHtml(tCon.produkt):"")+'</b> zugeordnet. <button class="linkbtn" data-action="clear-upload-target" style="display:inline">Nicht zuordnen</button></div>'):"";
   return review+
   '<section class="card"><h2 class="sect">➕ Dokument hinzufügen</h2>'+
   '<p class="muted" style="margin-bottom:14px">Einfach hochladen – der Butler liest alles aus und sortiert automatisch ein. Mehrere Dateien auf einmal sind kein Problem.</p>'+
   '<details style="margin:0 0 14px"><summary style="cursor:pointer;color:var(--accent);font-weight:600;font-size:.88rem">Was passiert beim Einlesen?</summary>'+
   '<p class="muted" style="font-size:.88rem;margin:8px 0 0">Der Butler erkennt selbst, worum es geht: Verträge werden angelegt bzw. zugeordnet und bei den Fristen überwacht, Arztrechnungen wandern in den 🩺 Gesundheitsbereich (mit Fachrichtung, Arzt, Betrag), alles Übrige ins Archiv – jeweils mit erkannter Kategorie und Person. Danach kannst du jede Einordnung anpassen.</p></details>'+
-  personHint+
+  targetHint+personHint+
   '<div class="upzone">'+
    '<button class="upbtn" data-action="pick-cam"><span class="uic">📷</span>Brief fotografieren<span class="usub">Kamera öffnet sich direkt</span></button>'+
    '<button class="upbtn" data-action="pick-file"><span class="uic">📄</span>Dateien auswählen<span class="usub">PDF, Fotos oder E-Mails (.eml) · mehrere möglich · auf Android auch aus Google Drive</span></button>'+
@@ -2015,6 +2034,7 @@ async function refreshHhMeta(){
 async function switchHousehold(hid){
   if(!hid||hid===activeHousehold)return;
   activeHousehold=hid;try{localStorage.setItem(hhKey(),hid);}catch(e){}
+  var app0=$("#app");if(app0)app0.innerHTML='<div class="aiwork" style="justify-content:center;padding:44px 14px"><span class="spin"></span><span class="aimsg">Haushalt wird geladen …</span></div>';
   try{await loadFromDB();}catch(e){toast("Daten konnten nicht geladen werden: "+errMsg(e),true);}
   renderApp();toast("Haushalt gewechselt: "+activeHouseholdName()+" ✅");
 }
@@ -2055,6 +2075,7 @@ async function joinUI(){
 /* ---------- Session ---------- */
 async function enterApp(session){
   currentUser=session.user;showAuth(false);
+  var app0=$("#app");if(app0)app0.innerHTML='<div class="aiwork" style="justify-content:center;padding:44px 14px"><span class="spin"></span><span class="aimsg">Der Butler deckt den Tisch …</span></div>';
   try{await loadHouseholds();}catch(e){}
   try{await loadFromDB();}catch(e){toast("Daten konnten nicht geladen werden: "+errMsg(e),true);}
   renderApp();
@@ -2163,7 +2184,7 @@ function nativeInit(){
       if(activeView!=="dashboard"){reviewDoc=null;go("dashboard");}
       else if(App.exitApp){App.exitApp();}
     });}catch(e){}
-    try{App.addListener("appStateChange",function(st){if(st&&st.isActive){if(pinSet()&&$("#lockscreen").hidden)showLock("verify");handleSharedIntent();}});}catch(e){}
+    try{App.addListener("appStateChange",function(st){if(st&&st.isActive){if(pinSet()&&$("#lockscreen").hidden)showLock("verify");handleSharedIntent();refreshIfStale();}});}catch(e){}
   }
   if(pinSet())showLock("verify");
   handleSharedIntent();
@@ -2351,8 +2372,8 @@ function gdriveCard(){
 
 /* ---------- Modal-Dialoge (ersetzen die Browser-Prompts) ---------- */
 var modalCb=null;
-function openModal(html){var w=$("#modal");if(!w)return;$("#modalBox").innerHTML=html;w.hidden=false;}
-function closeModal(){var w=$("#modal");if(!w)return;w.hidden=true;$("#modalBox").innerHTML="";modalCb=null;}
+function openModal(html){var w=$("#modal");if(!w)return;$("#modalBox").innerHTML=html;w.hidden=false;document.body.classList.add("modal-open");}
+function closeModal(){var w=$("#modal");if(!w)return;w.hidden=true;$("#modalBox").innerHTML="";modalCb=null;document.body.classList.remove("modal-open");}
 function askModal(title,label,value,type,btnLabel,cb){
   modalCb=cb;
   openModal('<h2 class="sect">'+title+'</h2><label class="f">'+label+'</label><input type="'+(type||"text")+'" id="mq_input" value="'+escapeHtml(value==null?"":value)+'">'+
@@ -2413,6 +2434,7 @@ function openDocEdit(id){
    '<label class="f">Zusammenfassung</label><textarea id="de_sum">'+escapeHtml(d.zusammenfassung||"")+'</textarea>'+
    '<label class="f">Notiz</label><textarea id="de_note">'+escapeHtml(d.note||"")+'</textarea>'+
    '<div class="btnrow"><button class="primary" data-action="doc-edit-save" data-id="'+d.id+'">💾 Speichern</button><button class="ghost" data-action="doc-open" data-id="'+d.id+'">Abbrechen</button></div>');
+  var f=$("#de_name");if(f)f.focus();
 }
 async function saveDocEdit(id){
   if(saveBusy)return;
@@ -2500,7 +2522,7 @@ function gsOpen(type,id){
 /* ---------- Events ---------- */
 function onAppClick(e){
   var nav=e.target.closest("[data-nav]");
-  if(nav){if(nav.dataset.nav==="add"){reviewDoc=null;importResults=[];}go(nav.dataset.nav);return;}
+  if(nav){if(nav.dataset.nav==="add"){reviewDoc=null;importResults=[];uploadTarget=null;}go(nav.dataset.nav);return;}
   var b=e.target.closest("[data-action]");if(!b)return;
   var act=b.dataset.action,id=b.dataset.id;
   if(act==="open-contract"){closeModal();detailId=id;activeView="contract-detail";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
@@ -2529,6 +2551,8 @@ function onAppClick(e){
   else if(act==="modal-close")closeModal();
   else if(act==="to-med"){closeModal();toMedical(id);}
   else if(act==="tips-more"){tipsExpanded=true;renderApp();}
+  else if(act==="add-for-contract"){uploadTarget=id;reviewDoc=null;importResults=[];activeView="add";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
+  else if(act==="clear-upload-target"){uploadTarget=null;renderApp();}
   else if(act==="med-edit"){medEditId=id;if(reviewDoc&&reviewDoc.id===id)reviewDoc=null;activeView="med-form";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
   else if(act==="med-save")onSaveMed();
   else if(act==="med-tovertrag")fromMedical(id);
@@ -2628,11 +2652,12 @@ function init(){
   }
   var gr=$("#gResults");if(gr)gr.addEventListener("click",function(e){var b=e.target.closest("[data-gres]");if(b)gsOpen(b.dataset.gres,b.dataset.id);});
   document.addEventListener("click",function(e){if(!e.target.closest(".gsearch"))gsHide();});
+  document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible")refreshIfStale();});
   document.addEventListener("keydown",function(e){
     if((e.ctrlKey||e.metaKey)&&(e.key==="k"||e.key==="K")){e.preventDefault();var g=$("#gSearch");if(g)g.focus();}
     else if(e.key==="Escape"){var mw=$("#modal");if(mw&&!mw.hidden)closeModal();}
   });
-  function onNav(e){var b=e.target.closest("[data-nav]");if(b){if(b.dataset.nav==="add"){reviewDoc=null;importResults=[];}go(b.dataset.nav);}}
+  function onNav(e){var b=e.target.closest("[data-nav]");if(b){if(b.dataset.nav==="add"){reviewDoc=null;importResults=[];uploadTarget=null;}go(b.dataset.nav);}}
   var t=$("#tabs");if(t)t.addEventListener("click",onNav);
   var tf=$("#tabsFoot");if(tf)tf.addEventListener("click",onNav);
   var tm=$("#tabsMobile");if(tm)tm.addEventListener("click",onNav);
