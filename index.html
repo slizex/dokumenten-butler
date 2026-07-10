@@ -802,7 +802,11 @@ async function ingest(opts){
   if(up.error)throw new Error(netErrText(up.error));
   var note=opts.emailSubject?("Aus E-Mail: "+opts.emailSubject):(opts.emailFrom?"Aus E-Mail-Anhang":null);
   var ins=await sb.from("documents").insert({household_id:activeHousehold,filename:opts.fname,storage_path:path,mime_type:opts.mime,size_bytes:bytes.length,doc_type:"sonstiges",note:note}).select("*").single();
-  if(ins.error)throw new Error(netErrText(ins.error));
+  if(ins.error){
+    /* kein DB-Eintrag → hochgeladene Datei nicht verwaisen lassen */
+    try{await sb.storage.from(BUCKET).remove([path]);}catch(e){}
+    throw new Error(netErrText(ins.error));
+  }
   var docRow=ins.data,ext=null;
   try{
     var reqBody=opts.textContent?{textContent:opts.textContent,model:modelPref()}:{fileBase64:bytesToBase64(bytes),mimeType:opts.mime,model:modelPref()};
@@ -832,7 +836,6 @@ async function ingest(opts){
   importResults.push(result);
   return result;
 }
-function blobToBase64(blob){return new Promise(function(res,rej){var r=new FileReader();r.onload=function(){var s=String(r.result||"");var i=s.indexOf(",");res(i>=0?s.slice(i+1):s);};r.onerror=function(){rej(new Error("Datei konnte nicht gelesen werden."));};r.readAsDataURL(blob);});}
 
 /* Vertragsspalten aus KI-Extraktion bauen (für Auto-Anlage) */
 function contractColsFromExt(ext){
@@ -1492,7 +1495,9 @@ function updateFormPreview(){
   box.hidden=!parts.length;
   box.innerHTML=parts.map(function(p){return '<div style="margin:2px 0">'+p+'</div>';}).join("");
 }
+var saveBusy=false; /* Doppelklick-Schutz: langsames Netz darf keine Duplikate erzeugen */
 async function onSaveContract(){
+  if(saveBusy)return;
   var anbieter=($("#cf_anbieter").value||"").trim();
   if(!anbieter){toast("Bitte mindestens den Anbieter angeben.",true);$("#cf_anbieter").focus();return;}
   var cols={
@@ -1525,6 +1530,7 @@ async function onSaveContract(){
     if(dup)warns.push("Es gibt bereits einen aktiven "+katInfo(cols.kategorie).label+"-Vertrag von „"+(dup.anbieter||"?")+"“"+(dup.produkt?" ("+dup.produkt+")":"")+".");
   }
   if(warns.length&&!confirm("🎩 Der Butler ist stutzig:\n\n• "+warns.join("\n• ")+"\n\nTrotzdem speichern?"))return;
+  saveBusy=true;
   try{
     var id=await saveContractData(cols,editId);
     if(pendingDoc&&!editId){try{var du={contract_id:id};if(cols.person_id)du.person_id=cols.person_id;await sb.from("documents").update(du).eq("id",pendingDoc);}catch(e){}}
@@ -1533,6 +1539,7 @@ async function onSaveContract(){
     detailId=id;activeView="contract-detail";renderApp();
     toast(wasEdit?"Vertrag aktualisiert ✅":"Vertrag angelegt ✅");
   }catch(e){toast("Speichern fehlgeschlagen: "+errMsg(e),true);}
+  finally{saveBusy=false;}
 }
 async function setContractStatus(id,status){
   var c=contractById(id);if(!c)return;
@@ -1688,6 +1695,7 @@ function viewMedForm(){
   '</section>';
 }
 async function onSaveMed(){
+  if(saveBusy)return;
   var d=DOCS.find(function(x){return x.id===medEditId;});if(!d)return;
   var pf=$("#mf_person");
   var beh=($("#mf_e_beh").value||"").trim();
@@ -1703,10 +1711,12 @@ async function onSaveMed(){
     person_id:(pf&&pf.value)?pf.value:null,
     extracted:ext
   };
+  saveBusy=true;
   try{
     var r=await sb.from("documents").update(cols).eq("id",d.id);if(r.error)throw r.error;
     medEditId=null;await loadFromDB();activeView="gesundheit";renderApp();toast("Arzt-Dokument gespeichert ✅");
   }catch(e){toast("Speichern fehlgeschlagen: "+errMsg(e),true);}
+  finally{saveBusy=false;}
 }
 /* Dokument in den Gesundheitsbereich verschieben bzw. zurück */
 async function toMedical(docId){
@@ -1730,7 +1740,7 @@ async function fromMedical(docId){
 /* Medizin-Review-Karte (statt Vertrags-Review) */
 function medReviewCard(rd,ext){
   var fa=fachInfo(rd.fachrichtung||"sonstiges"),mt=medTypInfo(rd.med_typ||"sonstiges");
-  var wichtig=(ext.wichtig&&ext.wichtig.length)?'<ul class="wichtig">'+ext.wichtig.map(function(w){return '<li>'+escapeHtml(w)+'</li>';}).join("")+'</ul>':"";
+  var wichtig=(Array.isArray(ext.wichtig)&&ext.wichtig.length)?'<ul class="wichtig">'+ext.wichtig.map(function(w){return '<li>'+escapeHtml(w)+'</li>';}).join("")+'</ul>':"";
   var smart=[];
   if(rd.person_id)smart.push('👤 Patient: '+personBadge(rd.person_id)+'.');
   else if(ext.vertragspartner){
@@ -1764,7 +1774,7 @@ function viewAdd(){
       review=medReviewCard(reviewDoc,ext);
     }else if(ext){
       var t=dtInfo(reviewDoc.doc_type),k=ext.kategorie?katInfo(ext.kategorie):null;
-      var wichtig=(ext.wichtig&&ext.wichtig.length)?'<ul class="wichtig">'+ext.wichtig.map(function(w){return '<li>'+escapeHtml(w)+'</li>';}).join("")+'</ul>':"";
+      var wichtig=(Array.isArray(ext.wichtig)&&ext.wichtig.length)?'<ul class="wichtig">'+ext.wichtig.map(function(w){return '<li>'+escapeHtml(w)+'</li>';}).join("")+'</ul>':"";
       var match=findMatch(ext);
       var smart=[],extraBtns="";
       /* Duplikat-Erkennung */
@@ -2057,6 +2067,7 @@ function handleSession(session){
     enteredUserId=session.user.id;enterApp(session);
   }else{
     enteredUserId=null;currentUser=null;CONTRACTS=[];DOCS=[];HOUSEHOLDS=[];activeHousehold=null;
+    try{closeModal();gsHide();var gsi=$("#gSearch");if(gsi)gsi.value="";}catch(e){}
     var app=$("#app");if(app)app.innerHTML="";
     showAuth(true);
   }
@@ -2144,6 +2155,11 @@ function nativeInit(){
     try{App.addListener("backButton",function(){
       if(!$("#lockscreen").hidden)return;
       if(document.body.classList.contains("app-hidden"))return;
+      /* Zurück-Taste schließt zuerst offene Dialoge/Suchergebnisse, dann erst Navigation */
+      var mw=$("#modal");
+      if(mw&&!mw.hidden){closeModal();return;}
+      var gr=$("#gResults");
+      if(gr&&!gr.hidden){gsHide();return;}
       if(activeView!=="dashboard"){reviewDoc=null;go("dashboard");}
       else if(App.exitApp){App.exitApp();}
     });}catch(e){}
@@ -2366,7 +2382,7 @@ function openDocDetail(id){
     dRow("Hochgeladen",fmtDate(String(d.created_at).slice(0,10)))+
     (d.note?dRow("Notiz",escapeHtml(d.note)):"")+
   '</div>';
-  var wichtig=(ext.wichtig&&ext.wichtig.length)?'<ul class="wichtig">'+ext.wichtig.map(function(w){return '<li>'+escapeHtml(w)+'</li>';}).join("")+'</ul>':"";
+  var wichtig=(Array.isArray(ext.wichtig)&&ext.wichtig.length)?'<ul class="wichtig">'+ext.wichtig.map(function(w){return '<li>'+escapeHtml(w)+'</li>';}).join("")+'</ul>':"";
   openModal('<h2 class="sect">'+t.icon+' '+escapeHtml(d.filename||"Dokument")+'</h2>'+
     (d.zusammenfassung?'<p style="margin:4px 0 8px">'+escapeHtml(d.zusammenfassung)+'</p>':"")+
     wichtig+(ext.hinweise?'<div class="ainote">💡 '+escapeHtml(ext.hinweise)+'</div>':"")+rows+
@@ -2399,6 +2415,7 @@ function openDocEdit(id){
    '<div class="btnrow"><button class="primary" data-action="doc-edit-save" data-id="'+d.id+'">💾 Speichern</button><button class="ghost" data-action="doc-open" data-id="'+d.id+'">Abbrechen</button></div>');
 }
 async function saveDocEdit(id){
+  if(saveBusy)return;
   var d=DOCS.find(function(x){return x.id===id;});if(!d)return;
   var ext=Object.assign({},d.extracted||{});
   ext.kategorie=$("#de_kat").value||null;
@@ -2411,9 +2428,11 @@ async function saveDocEdit(id){
     note:($("#de_note").value||"").trim()||null,
     extracted:ext
   };
+  saveBusy=true;
   try{var r=await sb.from("documents").update(cols).eq("id",id);if(r.error)throw r.error;
     await loadFromDB();closeModal();renderApp();toast("Dokument gespeichert ✅");}
   catch(e){toast("Speichern fehlgeschlagen: "+errMsg(e),true);}
+  finally{saveBusy=false;}
 }
 
 /* ---------- Auswahl-Dialoge: Vertrag / Person ---------- */
@@ -2474,8 +2493,7 @@ function gsRun(){
 function gsOpen(type,id){
   var inp=$("#gSearch");if(inp)inp.value="";gsHide();
   if(type==="contract"){detailId=id;activeView="contract-detail";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
-  else if(type==="doc")openDocDetail(id);
-  else if(type==="med"){medEditId=id;activeView="med-form";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
+  else if(type==="doc"||type==="med")openDocDetail(id); /* med wird dort zur med-form geroutet (inkl. reviewDoc-Reset) */
   else if(type==="person"){activePerson=id;go("dashboard");}
 }
 
