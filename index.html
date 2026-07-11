@@ -320,6 +320,14 @@ body.modal-open{overflow:hidden}
 .airow .aiwho{flex:none;font-weight:600;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .airow .aifile{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
 .airow .aicostv{flex:none;font-variant-numeric:tabular-nums}
+.memrow{display:flex;align-items:center;gap:10px;padding:8px 2px;border-bottom:1px solid var(--border);font-size:.9rem}
+.memrow:last-child{border-bottom:0}
+.memrow .memmail{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.memrow button{padding:5px 10px;font-size:.8rem}
+.errrow{padding:8px 2px;border-bottom:1px solid var(--border);font-size:.83rem}
+.errrow:last-child{border-bottom:0}
+.errrow .errmeta{color:var(--muted);font-size:.76rem;margin-bottom:2px}
+.errrow .errmsg{word-break:break-word}
 @media(max-width:620px){
  .modalwrap{align-items:flex-end;padding:0}
  .modalbox{border-radius:20px 20px 0 0;max-width:none;max-height:88vh;border-left:none;border-right:none;border-bottom:none}
@@ -525,6 +533,17 @@ var toastTimer;
 function toast(msg,err){
   var t=$("#toast");if(!t){t=document.createElement("div");t.id="toast";document.body.appendChild(t);}
   t.textContent=msg;t.className=err?"show err":"show";clearTimeout(toastTimer);toastTimer=setTimeout(function(){t.className="";},3500);
+  if(err)logError("meldung",msg);
+}
+/* Fehlerprotokoll (für den Admin-Bereich): schreibt still mit, stört nie den Ablauf */
+function logError(context,msg){
+  try{
+    if(!activeHousehold||!currentUser)return;
+    msg=String(msg==null?"?":msg).slice(0,600);
+    if(/fehlerprotokoll/i.test(msg))return; /* keine Schleifen über eigene Meldungen */
+    sb.from("error_log").insert({household_id:activeHousehold,user_email:currentUser.email||null,context:String(context||"app").slice(0,60),message:msg})
+      .then(function(){},function(){});
+  }catch(e){}
 }
 function katInfo(k){return KAT[k]||KAT.sonstiges;}
 function dtInfo(t){return DOCTYPE[t]||DOCTYPE.sonstiges;}
@@ -845,10 +864,23 @@ async function ingest(opts){
   var bytes;
   try{bytes=new Uint8Array(await opts.blob.arrayBuffer());}
   catch(e){throw new Error("Datei konnte nicht gelesen werden. Bitte erneut versuchen.");}
+  /* Dubletten-Erkennung: Inhalt hashen und gegen das Archiv prüfen – identische Dateien werden übersprungen (kein Upload, keine KI-Kosten) */
+  var hashHex=null;
+  try{
+    var hb=await crypto.subtle.digest("SHA-256",bytes);
+    hashHex=Array.prototype.map.call(new Uint8Array(hb),function(x){return x.toString(16).padStart(2,"0");}).join("");
+  }catch(e){}
+  if(hashHex){
+    var dupDoc=DOCS.find(function(d){return d.content_hash===hashHex;});
+    if(dupDoc){
+      var resDup={name:opts.fname||"Dokument",icon:"⏭️",text:"übersprungen – identisch mit „"+(dupDoc.filename||"?")+"“ vom "+fmtDate(dupDoc.doc_date||String(dupDoc.created_at).slice(0,10)),view:"docs",id:dupDoc.id};
+      importResults.push(resDup);return resDup;
+    }
+  }
   var up=await uploadWithRetry(path,bytes,opts.mime);
   if(up.error)throw new Error(netErrText(up.error));
   var note=opts.emailSubject?("Aus E-Mail: "+opts.emailSubject):(opts.emailFrom?"Aus E-Mail-Anhang":null);
-  var ins=await sb.from("documents").insert({household_id:activeHousehold,filename:opts.fname,storage_path:path,mime_type:opts.mime,size_bytes:bytes.length,doc_type:"sonstiges",note:note}).select("*").single();
+  var ins=await sb.from("documents").insert({household_id:activeHousehold,filename:opts.fname,storage_path:path,mime_type:opts.mime,size_bytes:bytes.length,doc_type:"sonstiges",note:note,content_hash:hashHex}).select("*").single();
   if(ins.error){
     /* kein DB-Eintrag → hochgeladene Datei nicht verwaisen lassen */
     try{await sb.storage.from(BUCKET).remove([path]);}catch(e){}
@@ -882,10 +914,101 @@ async function ingest(opts){
     await sb.from("documents").update(upd).eq("id",docRow.id);
   }catch(e){}
   var result=await autoFileDoc(docRow.id,ext);
+  /* Ältere Dokumente haben noch keinen Hash: inhaltliche Ähnlichkeit als Warnung */
+  try{
+    if(ext&&ext.vertragsnummer&&ext.datum){
+      var sim=DOCS.find(function(d){var dx=d.extracted;return d.id!==docRow.id&&dx&&dx.vertragsnummer===ext.vertragsnummer&&dx.datum===ext.datum&&dx.docType===ext.docType;});
+      if(sim)result.text+=" · ⚠️ sehr ähnlich zu „"+(sim.filename||"?")+"“ – evtl. doppelt";
+    }
+  }catch(e){}
   importResults.push(result);
   return result;
 }
 
+/* Kategorie-spezifische Zusatzfelder: je Vertragsart nur die relevanten Angaben */
+var DETAIL_FIELDS={
+  versicherung:[
+    {k:"versichertesObjekt",l:"Versichert ist",t:"text"},
+    {k:"deckungsart",l:"Deckungsumfang",t:"text"},
+    {k:"deckungssumme",l:"Deckungssumme (€)",t:"eur"},
+    {k:"selbstbeteiligung",l:"Selbstbeteiligung (€)",t:"eur"},
+    {k:"schadenfreiheitsklasse",l:"Schadenfreiheitsklasse (SF)",t:"text"},
+    {k:"sfProzent",l:"SF-Beitragssatz (%)",t:"num"}
+  ],
+  kfz:[
+    {k:"fahrzeug",l:"Fahrzeug",t:"text"},
+    {k:"kennzeichen",l:"Kennzeichen",t:"text"},
+    {k:"deckungsart",l:"Deckung (Haftpflicht/Teil-/Vollkasko)",t:"text"},
+    {k:"schadenfreiheitsklasse",l:"Schadenfreiheitsklasse (SF)",t:"text"},
+    {k:"sfProzent",l:"SF-Beitragssatz (%)",t:"num"},
+    {k:"selbstbeteiligung",l:"Selbstbeteiligung (€)",t:"eur"}
+  ],
+  mobilfunk:[
+    {k:"rufnummer",l:"Rufnummer",t:"text"},
+    {k:"datenvolumen",l:"Datenvolumen",t:"text"},
+    {k:"endgeraet",l:"Endgerät",t:"text"}
+  ],
+  internet:[
+    {k:"geschwindigkeit",l:"Geschwindigkeit",t:"text"},
+    {k:"router",l:"Router / Hardware",t:"text"}
+  ],
+  strom:[
+    {k:"zaehlernummer",l:"Zählernummer",t:"text"},
+    {k:"jahresverbrauch",l:"Jahresverbrauch (kWh)",t:"num"},
+    {k:"arbeitspreis",l:"Arbeitspreis (ct/kWh)",t:"num"},
+    {k:"grundpreis",l:"Grundpreis (€/Monat)",t:"num"},
+    {k:"abschlag",l:"Monatlicher Abschlag (€)",t:"eur"}
+  ],
+  wasser:[
+    {k:"zaehlernummer",l:"Zählernummer",t:"text"},
+    {k:"abschlag",l:"Monatlicher Abschlag (€)",t:"eur"}
+  ],
+  streaming:[
+    {k:"aboStufe",l:"Abo-Stufe",t:"text"},
+    {k:"profile",l:"Profile / Geräte",t:"text"}
+  ],
+  bank:[
+    {k:"kontoart",l:"Konto-/Produktart",t:"text"},
+    {k:"zinssatz",l:"Zinssatz (%)",t:"num"}
+  ],
+  wohnen:[
+    {k:"objekt",l:"Objekt / Adresse",t:"text"},
+    {k:"flaeche",l:"Fläche (m²)",t:"num"},
+    {k:"nebenkosten",l:"Nebenkosten (€/Monat)",t:"num"}
+  ],
+  mitgliedschaft:[
+    {k:"leistungsumfang",l:"Leistungsumfang",t:"text"}
+  ]
+};
+DETAIL_FIELDS.gas=DETAIL_FIELDS.strom;
+function detailFields(kat){return DETAIL_FIELDS[kat]||[];}
+function fmtDetail(f,v){
+  if(v==null||v==="")return "–";
+  if(f&&f.t==="eur"&&!isNaN(Number(v)))return fmtEur(Number(v));
+  if(f&&f.t==="num"&&!isNaN(Number(v)))return Number(v).toLocaleString("de-DE");
+  return escapeHtml(String(v));
+}
+/* Formular-Block für die Zusatzfelder der gewählten Kategorie */
+function detailFormHtml(kat,details){
+  var fs=detailFields(kat);
+  if(!fs.length)return "";
+  return '<div class="acclabel accsep">'+katInfo(kat).icon+' Besondere Angaben – '+katInfo(kat).label+'</div><div class="formrow">'+
+    fs.map(function(f){
+      var v=(details&&details[f.k]!=null)?details[f.k]:"";
+      var typ=(f.t==="eur"||f.t==="num")?' type="number" step="any" min="0"':' type="text"';
+      return '<div><label class="f">'+f.l+'</label><input class="cfdet" data-k="'+f.k+'" data-t="'+f.t+'"'+typ+' value="'+escapeHtml(String(v))+'"></div>';
+    }).join("")+'</div>';
+}
+function collectDetailInputs(){
+  var det={};
+  Array.prototype.forEach.call(document.querySelectorAll(".cfdet"),function(el){
+    var val=(el.value||"").trim();if(!val)return;
+    var t=el.dataset.t;
+    if(t==="eur"||t==="num"){var n=parseFloat(val.replace(",","."));if(!isNaN(n))det[el.dataset.k]=n;}
+    else det[el.dataset.k]=val;
+  });
+  return det;
+}
 /* Vertragsspalten aus KI-Extraktion bauen (für Auto-Anlage) */
 function contractColsFromExt(ext){
   function num(v){return (v!=null&&v!=="")?Number(v):null;}
@@ -899,6 +1022,20 @@ function contractColsFromExt(ext){
     verlaengerung_monate:num(ext.verlaengerungMonate),
     kosten:num(ext.kosten),kosten_intervall:ext.kostenIntervall||"monatlich"
   };
+}
+/* KI-erkannte Zusatzangaben (details) säubern und übernehmen */
+function detailsFromExt(ext){
+  var src=ext&&ext.details;
+  if(!src||typeof src!=="object"||Array.isArray(src))return null;
+  var out={},n=0;
+  Object.keys(src).forEach(function(k){
+    var v=src[k];
+    if(v==null||v==="")return;
+    if(typeof v!=="string"&&typeof v!=="number"&&typeof v!=="boolean")return;
+    out[String(k).slice(0,40)]=(typeof v==="string")?v.slice(0,200):v;
+    n++;
+  });
+  return n?out:null;
 }
 /* Automatisch einsortieren: Medizin→Gesundheit, Vertrag→verknüpfen/neu anlegen, sonst Archiv */
 async function autoFileDoc(docId,ext){
@@ -918,14 +1055,39 @@ async function autoFileDoc(docId,ext){
     var notes=[];
     if(ext&&ext.docType!=="rechnung"&&ext.kosten!=null&&match.kosten!=null&&Math.abs(ext.kosten-match.kosten)>=0.01)notes.push("Preis "+(ext.kosten>match.kosten?"gestiegen":"gesunken")+" auf "+fmtEur(ext.kosten)+" – im Vertrag prüfen");
     if(ext&&ext.docType==="rechnung"&&ext.betrag!=null&&match.kosten!=null&&Math.abs(ext.betrag-match.kosten)>Math.max(0.5,match.kosten*0.02))notes.push("Rechnungsbetrag weicht vom Tarif ab");
-    return {name:name,icon:katInfo(match.kategorie).icon,text:"zu „"+(match.anbieter||"Vertrag")+"“ zugeordnet",view:"contract-detail",id:match.id,notes:notes};
+    var extraTxt="";
+    /* Vertrag hat noch keine Person, das Dokument schon → automatisch übernehmen */
+    if(!match.person_id&&d.person_id){
+      try{await saveContractData({person_id:d.person_id},match.id);var pp0=personById(d.person_id);extraTxt=" · Person "+((pp0&&pp0.name)||"")+" zugeordnet";}catch(e){}
+    }
+    /* neu erkannte kategorie-spezifische Angaben ergänzen (nur fehlende Schlüssel, nie überschreiben) */
+    try{
+      var mDet=detailsFromExt(ext);
+      if(mDet){
+        var curD=match.details||{},nAdd=0,merged={};
+        Object.keys(curD).forEach(function(k){merged[k]=curD[k];});
+        Object.keys(mDet).forEach(function(k){if(merged[k]==null||merged[k]===""){merged[k]=mDet[k];nAdd++;}});
+        if(nAdd)await saveContractData({details:merged},match.id);
+      }
+    }catch(e){}
+    return {name:name,icon:katInfo(match.kategorie).icon,text:"zu „"+(match.anbieter||"Vertrag")+"“ zugeordnet"+extraTxt,view:"contract-detail",id:match.id,notes:notes};
   }
   if(ext&&(ext.docType==="vertrag"||ext.docType==="police")&&ext.anbieter){
     try{
-      var cols=contractColsFromExt(ext);if(d.person_id)cols.person_id=d.person_id;
+      var cols=contractColsFromExt(ext);
+      var extDet=detailsFromExt(ext);if(extDet)cols.details=extDet;
+      var personTxt="";
+      if(d.person_id){cols.person_id=d.person_id;}
+      else if(ext.vertragspartner&&String(ext.vertragspartner).trim().length>=3&&/[a-zäöü]/i.test(ext.vertragspartner)){
+        /* erkannten Vertragspartner automatisch als Person anlegen und zuordnen */
+        try{
+          var np=await createPerson(String(ext.vertragspartner).trim());
+          if(np){cols.person_id=np.id;try{await sb.from("documents").update({person_id:np.id}).eq("id",d.id);}catch(e){}personTxt=" · Person „"+np.name+"“ angelegt";}
+        }catch(e){}
+      }
       var newId=await saveContractData(cols,null);
       await linkDocSilent(d.id,newId);
-      return {name:name,icon:katInfo(cols.kategorie).icon,text:"neuer Vertrag „"+ext.anbieter+"“ angelegt",view:"contract-detail",id:newId};
+      return {name:name,icon:katInfo(cols.kategorie).icon,text:"neuer Vertrag „"+ext.anbieter+"“ angelegt"+personTxt,view:"contract-detail",id:newId};
     }catch(e){}
   }
   var kat=(ext&&ext.kategorie)?katInfo(ext.kategorie):null;
@@ -1448,6 +1610,7 @@ function viewContractDetail(){
     dOpt("Kündigungsfrist",c.kuendigungsfrist_monate!=null,fristTxt(c.kuendigungsfrist_monate))+
     dOpt("Verlängerung",c.verlaengerung_monate!=null,c.verlaengerung_monate<=1?"monatlich":"um "+c.verlaengerung_monate+" Monate")+
     dOpt("Kosten",c.kosten!=null,c.kosten!=null?fmtEur(c.kosten)+" / "+(INTERVALL_LABEL[c.kosten_intervall]||"?")+(mk?" (= "+fmtEur(mk)+" mtl.)":""):"")+
+    detailRows(c)+
     dRow("Status",c.status==="aktiv"?"✅ aktiv":(c.status==="gekuendigt"?"✂️ gekündigt"+(c.gekuendigt_zum?" zum "+fmtDate(c.gekuendigt_zum):""):"beendet"))+
     (c.notizen?dRow("Notizen",escapeHtml(c.notizen)):"")+
   '</div>'+
@@ -1466,14 +1629,34 @@ function viewContractDetail(){
       (f.lastDay?'<button class="primary" data-action="ics" data-id="'+c.id+'">📅 Frist in Kalender</button>':"")+
       '<button class="ghost" data-action="edit-contract" data-id="'+c.id+'">✏️ Bearbeiten</button>'+
       (docs.some(function(d){return !!d.extracted;})?'<button class="ghost" data-action="adjust-contract" data-id="'+c.id+'">🔄 Aus Dokumenten aktualisieren</button>':"")+
+      (c.anbieter&&!c.recherche?'<button class="ghost" data-action="research-contract" data-id="'+c.id+'">🌐 Details recherchieren</button>':"")+
       statusBtn+
       '<button class="danger" data-action="del-contract" data-id="'+c.id+'">🗑️ Löschen</button>'+
     '</div></section>'+
+    rechercheCard(c)+
     invoiceHistory(c)+
     '<section class="card"><h2 class="sect">📁 Dokumente zu diesem Vertrag</h2>'+docsHtml+
     '<div class="btnrow"><button class="ghost" data-action="add-for-contract" data-id="'+c.id+'">➕ Dokument zu diesem Vertrag hinzufügen</button></div></section>';
 }
 function dRow(k,v){return '<span class="dk">'+k+'</span><span class="dv">'+v+'</span>';}
+/* Kategorie-spezifische Zusatzangaben im Vertragsdetail */
+function detailRows(c){
+  var det=c.details;
+  if(!det||typeof det!=="object")return "";
+  var fs=detailFields(c.kategorie),done={},out="";
+  fs.forEach(function(f){
+    var v=det[f.k];done[f.k]=1;
+    if(v==null||v==="")return;
+    out+=dRow(f.l.replace(/\s*\([^)]*\)$/,""),fmtDetail(f,v));
+  });
+  /* unbekannte Zusatz-Schlüssel trotzdem zeigen (z. B. nach Kategorie-Wechsel) */
+  Object.keys(det).forEach(function(k){
+    if(done[k]||det[k]==null||det[k]==="")return;
+    var label=k.replace(/([a-z])([A-Z])/g,"$1 $2");label=label.charAt(0).toUpperCase()+label.slice(1);
+    out+=dRow(escapeHtml(label),escapeHtml(String(det[k])));
+  });
+  return out;
+}
 /* Monatsrechnungen: aus zugeordneten Rechnungs-Dokumenten Verlauf + Trend bauen */
 function invoiceDate(d){
   var e=d.extracted||{};
@@ -1579,6 +1762,7 @@ function viewContractForm(){
    '<div><label class="f">Kosten (€)</label><input type="number" id="cf_kosten" min="0" step="0.01" value="'+escapeHtml(v("kosten","kosten"))+'"></div>'+
    '<div><label class="f">Zahlungsintervall</label><select id="cf_iv">'+ivOpts+'</select></div>'+
   '</div>'+
+  '<div id="cfDetails">'+detailFormHtml(kat,(c&&c.details)||p.details||{})+'</div>'+
   '<div id="cfPreview" class="ainote" hidden></div>'+
   '<label class="f">Notizen</label><textarea id="cf_notizen">'+escapeHtml(v("notizen"))+'</textarea>'+
   '<div class="btnrow"><button class="primary" data-action="save-contract">💾 Vertrag speichern</button><button class="ghost" data-nav="contracts">Abbrechen</button></div>'+
@@ -1633,6 +1817,8 @@ async function onSaveContract(){
     kosten_intervall:$("#cf_iv").value||"monatlich",
     notizen:($("#cf_notizen").value||"").trim()||null
   };
+  var cfDet=collectDetailInputs();
+  cols.details=Object.keys(cfDet).length?cfDet:null;
   var pf=$("#cf_person");cols.person_id=(pf&&pf.value)?pf.value:null;
   /* Plausibilitätsprüfung: der Butler warnt, blockiert aber nicht */
   var warns=[];
@@ -1996,12 +2182,13 @@ function viewSettings(){
       '<div style="margin-top:8px"><input type="password" id="acc_newpass" autocomplete="new-password" placeholder="Neues Passwort (mind. 6 Zeichen)"><div class="btnrow"><button class="ghost" data-action="acc-change-pass">Passwort speichern</button></div></div></details>'+
     '<div class="acclabel accsep">'+(HOUSEHOLDS.length>1?"Deine Haushalte":"Dein Haushalt")+'</div>'+
     '<div class="hhlist">'+opts+'</div>'+
-    '<p class="muted" id="hhMeta" style="font-size:.85rem;margin-top:8px"></p>'+
+    '<div id="hhMeta" style="margin-top:8px"></div>'+
     '<p class="muted" style="font-size:.8rem">Haushalte werden mit dem Verbrauchs-Tracker geteilt – gleiche Anmeldung, gleiche Mitglieder.</p>'+
     '<button class="linkbtn" data-action="hh-rename" style="margin-top:12px">✏️ Aktuellen Haushalt umbenennen</button>'+
-    '<div class="acclabel accsep">👥 Mitbenutzer einladen (teilt sich das Konto)</div>'+
+    '<p class="muted" id="adminHint" style="font-size:.8rem;margin-top:10px" hidden>👑 Mitglieder einladen und entfernen kann nur der Haushalts-Admin.</p>'+
+    '<div id="inviteWrap" hidden><div class="acclabel accsep">👥 Mitbenutzer einladen (teilt sich das Konto)</div>'+
     '<button class="ghost" data-action="hh-invite">Einladungs-Code erstellen</button>'+
-    '<div id="inviteOut" class="inviteout" hidden></div>'+
+    '<div id="inviteOut" class="inviteout" hidden></div></div>'+
     '<div class="acclabel accsep">Einer Einladung beitreten</div>'+
     '<div class="hhadd"><input id="hhJoinCode" type="text" maxlength="12" placeholder="Code eingeben"><button class="ghost" data-action="hh-join">Beitreten</button></div>'+
   '</section>'+
@@ -2021,6 +2208,7 @@ function viewSettings(){
   aiUsageCard()+
   gdriveCard()+
   securityCard()+
+  errorLogCard()+
   '<section class="card"><details><summary style="cursor:pointer;font-weight:650;font-size:1rem">ℹ️ Wie rechnet der Butler?</summary>'+
     '<p class="muted" style="font-size:.9rem;margin:10px 0 0">Kündbar zum = Vertragsbeginn + Mindestlaufzeit. Letzter Kündigungstag = dieses Datum minus Kündigungsfrist. 🔴 = weniger als 30 Tage, 🟡 = weniger als 90 Tage. Für Verträge ab dem 1. März 2022 gilt das Gesetz für faire Verbraucherverträge: Nach der Mindestlaufzeit sind sie jederzeit mit höchstens 1 Monat Frist kündbar – der Butler berücksichtigt das automatisch.</p>'+
   '</details></section>'+
@@ -2130,10 +2318,22 @@ async function loadHouseholds(){
 async function refreshHhMeta(){
   var el=$("#hhMeta");if(!el||!activeHousehold)return;
   try{
-    var r=await sbPub.rpc("household_members_emails",{p_household_id:activeHousehold});
-    var emails=(r&&!r.error&&Array.isArray(r.data))?r.data.map(function(x){return x.email;}):[];
-    if(emails.length>1)el.innerHTML='👨‍👩‍👧 '+emails.length+' Mitglieder: '+emails.map(function(e){return escapeHtml(e);}).join(", ");
-    else el.textContent="Nur du nutzt diesen Haushalt.";
+    var r=await sbPub.rpc("household_members_info",{p_household_id:activeHousehold});
+    if(r.error)throw r.error;
+    var rows=Array.isArray(r.data)?r.data:[];
+    var me=rows.find(function(m){return currentUser&&m.user_id===currentUser.id;});
+    var iAmAdmin=!!(me&&me.is_admin);
+    el.innerHTML=rows.map(function(m){
+      var self=(currentUser&&m.user_id===currentUser.id);
+      return '<div class="memrow">'+
+        '<span class="memmail">'+escapeHtml(m.email||"?")+(self?' <span class="muted">(du)</span>':"")+'</span>'+
+        (m.is_admin?'<span class="badge gray" style="flex:none">👑 Admin</span>':"")+
+        ((iAmAdmin&&!m.is_admin)?'<button class="danger" data-action="hh-remove" data-id="'+m.user_id+'" data-mail="'+escapeHtml(m.email||"")+'" title="Aus dem Haushalt entfernen">🗑️</button>':"")+
+      '</div>';
+    }).join("")||'<p class="muted" style="font-size:.85rem">Nur du nutzt diesen Haushalt.</p>';
+    var iw=$("#inviteWrap");if(iw)iw.hidden=!iAmAdmin;
+    var ah=$("#adminHint");if(ah)ah.hidden=iAmAdmin;
+    var ec=$("#errCard");if(ec){ec.hidden=!iAmAdmin;if(iAmAdmin)refreshErrLog();}
   }catch(e){el.textContent="";}
 }
 async function switchHousehold(hid){
@@ -2162,7 +2362,22 @@ async function inviteUI(){
     var code=r.data,out=$("#inviteOut");
     if(out){out.hidden=false;out.innerHTML='<div>Code: <b class="invcode">'+code+'</b><button class="invcopy" data-action="hh-copy" data-code="'+code+'">Kopieren</button></div>'+
       '<p class="invhint">Gib diesen Code weiter. Die Person meldet sich an und trägt ihn unter „Einer Einladung beitreten“ ein. Gültig 14 Tage, einmalig nutzbar.</p>';}
-  }catch(e){toast("Konnte Einladung nicht erstellen: "+errMsg(e),true);}
+  }catch(e){var im=errMsg(e);if(/not_admin/.test(im))im="Nur der Haushalts-Admin kann Mitglieder einladen.";toast("Konnte Einladung nicht erstellen: "+im,true);}
+}
+async function removeMemberUI(uid,mail){
+  if(!activeHousehold||!uid)return;
+  if(!confirm((mail||"Dieses Mitglied")+" wirklich aus dem Haushalt entfernen? Die Person verliert den Zugriff auf alle Haushaltsdaten (auch im Verbrauchs-Tracker)."))return;
+  try{
+    var r=await sbPub.rpc("remove_household_member",{p_household_id:activeHousehold,p_user_id:uid});
+    if(r.error)throw r.error;
+    toast("Mitglied entfernt ✅");
+    refreshHhMeta();
+  }catch(e){
+    var m=errMsg(e);
+    if(/not_admin/.test(m))m="Nur der Haushalts-Admin kann Mitglieder verwalten.";
+    if(/cannot_remove_admin/.test(m))m="Der Admin kann nicht entfernt werden.";
+    toast(m,true);
+  }
 }
 function copyInvite(code){if(!code)return;try{navigator.clipboard.writeText(code).then(function(){toast("Code kopiert ✅");},function(){toast("Code: "+code);});}catch(e){toast("Code: "+code);}}
 async function joinUI(){
@@ -2378,6 +2593,83 @@ function securityCard(){
       '<label style="display:flex;align-items:center;gap:10px;margin-top:14px;font-size:.95rem;cursor:pointer"><input type="checkbox" id="bioToggle" style="width:auto"'+(bioEnabled()?" checked":"")+'> Mit Fingerabdruck / Gesicht entsperren</label>'
       :
       '<div class="btnrow"><button class="primary" data-action="pin-set">🔒 PIN einrichten</button></div>')+
+  '</section>';
+}
+
+/* ---------- Fehlerprotokoll (Admin) ---------- */
+function errorLogCard(){
+  return '<section class="card" id="errCard" hidden><h2 class="sect">🐞 Fehlerprotokoll</h2>'+
+    '<p class="muted" style="font-size:.85rem;margin-bottom:8px">Hier sammelt der Butler automatisch alle aufgetretenen Fehler (nur der Admin sieht diese Karte). Taucht etwas wiederholt auf: Text kopieren und Claude zeigen – dann wird es gemeinsam gefixt.</p>'+
+    '<div id="errList"><p class="muted" style="font-size:.85rem">Wird geladen …</p></div>'+
+    '<div class="btnrow"><button class="ghost" data-action="err-clear">🧹 Protokoll leeren</button></div>'+
+  '</section>';
+}
+async function refreshErrLog(){
+  var el=$("#errList");if(!el||!activeHousehold)return;
+  try{
+    var r=await sb.from("error_log").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:false}).limit(20);
+    if(r.error)throw r.error;
+    var rows=r.data||[];
+    if(!rows.length){el.innerHTML='<p class="muted" style="font-size:.85rem">Keine Fehler protokolliert – alles läuft rund ✅</p>';return;}
+    el.innerHTML=rows.map(function(x){
+      var d=new Date(x.created_at);
+      var when=isNaN(d)?"–":(d.toLocaleDateString("de-DE",{day:"2-digit",month:"2-digit"})+" "+d.toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}));
+      return '<div class="errrow"><div class="errmeta">'+when+' · '+escapeHtml((x.user_email||"?").split("@")[0])+' · '+escapeHtml(x.context||"app")+'</div><div class="errmsg">'+escapeHtml(x.message||"")+'</div></div>';
+    }).join("");
+  }catch(e){el.innerHTML='<p class="muted" style="font-size:.85rem">Protokoll konnte nicht geladen werden.</p>';}
+}
+
+/* ---------- Internet-Recherche am Vertrag (KI mit Websuche) ---------- */
+var researchBusy=false;
+async function researchContract(cid){
+  var c=contractById(cid);if(!c)return;
+  if(!c.anbieter){toast("Bitte zuerst einen Anbieter eintragen.",true);return;}
+  if(researchBusy)return;
+  researchBusy=true;
+  openModal('<h2 class="sect">🌐 Internet-Recherche</h2><div class="aiwork" style="justify-content:center"><span class="spin"></span><span class="aimsg">Der Butler recherchiert zu „'+escapeHtml(c.anbieter)+(c.produkt?" – "+escapeHtml(c.produkt):"")+'“ … das kann bis zu einer Minute dauern.</span></div>');
+  try{
+    var r=await sb.functions.invoke("butler-research",{body:{anbieter:c.anbieter,produkt:c.produkt||null,kategorie:c.kategorie||null,kosten:c.kosten,kostenIntervall:c.kosten_intervall||null,vertragsstart:c.vertragsstart||null,model:modelPref()}});
+    if(r.error)throw r.error;
+    var body=r.data||{};if(body.error)throw new Error(body.error);
+    if(!body.recherche)throw new Error("Keine Rechercheergebnisse erhalten.");
+    await saveContractData({recherche:body.recherche,recherche_am:new Date().toISOString()},cid);
+    try{await sb.from("ai_usage").insert({household_id:activeHousehold,user_email:(currentUser&&currentUser.email)||null,model:body.modell||null,input_tokens:(body.usage&&typeof body.usage.input==="number")?body.usage.input:null,output_tokens:(body.usage&&typeof body.usage.output==="number")?body.usage.output:null,filename:"🌐 Recherche: "+(c.anbieter||"?")+((body.usage&&body.usage.searches)?" · "+body.usage.searches+" Suchen":"")});}catch(e){}
+    await loadFromDB();
+    closeModal();
+    detailId=cid;activeView="contract-detail";renderApp();
+    toast("Recherche abgeschlossen ✅");
+  }catch(e){closeModal();toast("Recherche fehlgeschlagen: "+errMsg(e),true);}
+  finally{researchBusy=false;}
+}
+/* Recherchierte Konditionen, die dem Vertrag noch fehlen (konservativ: keine Preise) */
+function rechercheFills(c){
+  var td=(c&&c.recherche&&c.recherche.tarifdetails)||{};
+  var map=[
+    {col:"mindestlaufzeit_monate",k:"mindestlaufzeitMonate",label:"Mindestlaufzeit"},
+    {col:"kuendigungsfrist_monate",k:"kuendigungsfristMonate",label:"Kündigungsfrist"},
+    {col:"verlaengerung_monate",k:"verlaengerungMonate",label:"Verlängerung"}
+  ];
+  var out=[];
+  map.forEach(function(f){
+    var v=td[f.k];
+    if(v!=null&&v!==""&&!isNaN(Number(v))&&(c[f.col]==null||c[f.col]===""))out.push({col:f.col,val:Number(v),label:f.label});
+  });
+  return out;
+}
+function rechercheCard(c){
+  if(!c.recherche)return "";
+  var rc=c.recherche;
+  var le=(Array.isArray(rc.leistungen)&&rc.leistungen.length)?'<ul class="wichtig">'+rc.leistungen.map(function(l){return '<li>'+escapeHtml(String(l))+'</li>';}).join("")+'</ul>':"";
+  var qs=(Array.isArray(rc.quellen)&&rc.quellen.length)?'<p class="muted" style="font-size:.8rem;margin-top:8px">Quellen: '+rc.quellen.slice(0,5).map(function(q){var u=String((q&&q.url)||"");var t=String((q&&q.titel)||u||"Quelle");if(!/^https?:\/\//i.test(u))return escapeHtml(t);return '<a href="'+escapeHtml(u)+'" target="_blank" rel="noopener">'+escapeHtml(t)+'</a>';}).join(" · ")+'</p>':"";
+  var sug=rechercheFills(c);
+  var sugHtml=sug.length?('<div class="ainote">💡 Gefundene Konditionen, die dem Vertrag noch fehlen: '+sug.map(function(s){return s.label+" = "+adjFmt(s.col,s.val);}).join(", ")+' <button class="linkbtn" data-action="research-fill" data-id="'+c.id+'" style="display:inline">Übernehmen</button></div>'):"";
+  return '<section class="card"><h2 class="sect">🌐 Internet-Recherche</h2>'+
+    '<p class="muted" style="font-size:.8rem;margin:0 0 8px">Stand '+fmtDate(String(c.recherche_am||"").slice(0,10))+' · öffentliche Angaben – können vom individuell abgeschlossenen Vertrag abweichen.</p>'+
+    (rc.zusammenfassung?'<p style="font-size:.92rem">'+escapeHtml(String(rc.zusammenfassung))+'</p>':"")+
+    le+
+    (rc.hinweise?'<div class="ainote">💡 '+escapeHtml(String(rc.hinweise))+'</div>':"")+
+    sugHtml+qs+
+    '<div class="btnrow"><button class="ghost" data-action="research-contract" data-id="'+c.id+'">🔄 Neu recherchieren</button></div>'+
   '</section>';
 }
 
@@ -2818,6 +3110,16 @@ function onAppClick(e){
   }
   else if(act==="adjust-contract")openAdjustModal(id,"");
   else if(act==="adjust-apply")applyAdjust();
+  else if(act==="research-contract")researchContract(id);
+  else if(act==="research-fill"){
+    (async function(){
+      var rfc=contractById(id);if(!rfc)return;
+      var rfills=rechercheFills(rfc);if(!rfills.length)return;
+      var rcols={};rfills.forEach(function(f){rcols[f.col]=f.val;});
+      try{await saveContractData(rcols,id);await loadFromDB();renderApp();toast(rfills.length+" Angabe"+(rfills.length===1?"":"n")+" ergänzt ✅");}
+      catch(e){toast("Ergänzen fehlgeschlagen: "+errMsg(e),true);}
+    })();
+  }
   else if(act==="mq-ok"){var mqv=$("#mq_input")?$("#mq_input").value:"";var mqcb=modalCb;modalCb=null;closeModal();if(mqcb)mqcb(mqv);}
   else if(act==="modal-close")closeModal();
   else if(act==="to-med"){closeModal();toMedical(id);}
@@ -2857,6 +3159,11 @@ function onAppClick(e){
   else if(act==="hh-switch")switchHousehold(id);
   else if(act==="hh-rename")renameHouseholdUI();
   else if(act==="hh-invite")inviteUI();
+  else if(act==="hh-remove")removeMemberUI(id,b.dataset.mail);
+  else if(act==="err-clear"){
+    if(!confirm("Fehlerprotokoll wirklich leeren?"))return;
+    (async function(){try{var er=await sb.from("error_log").delete().eq("household_id",activeHousehold);if(er.error)throw er.error;refreshErrLog();toast("Fehlerprotokoll geleert ✅");}catch(e){toast("Leeren fehlgeschlagen: "+errMsg(e),true);}})();
+  }
   else if(act==="hh-copy")copyInvite(b.dataset.code);
   else if(act==="hh-join")joinUI();
   else if(act==="export-json")exportJSON();
@@ -2895,6 +3202,12 @@ function onAppClick(e){
   else if(act==="logout")doLogout();
 }
 function onAppChange(e){
+  if(e.target.id==="cf_kategorie"){
+    /* Kategorie gewechselt → passende Zusatzfelder zeigen (eingegebene Werte mitnehmen) */
+    var box=$("#cfDetails");
+    if(box){var kept=collectDetailInputs();box.innerHTML=detailFormHtml(e.target.value||"sonstiges",kept);}
+    updateFormPreview();return;
+  }
   if(e.target.id&&e.target.id.indexOf("cf_")===0){updateFormPreview();return;}
   if(e.target.id==="fileCam"||e.target.id==="filePick"){
     var files=Array.prototype.slice.call(e.target.files||[]);e.target.value="";
@@ -2978,6 +3291,8 @@ function init(){
   if("serviceWorker" in navigator){try{navigator.serviceWorker.register("sw.js");}catch(e){}}
   try{nativeInit();}catch(e){}
 }
+window.addEventListener("error",function(e){logError("js",(e&&e.message?e.message:"Skriptfehler")+(e&&e.lineno?" @Zeile "+e.lineno:""));});
+window.addEventListener("unhandledrejection",function(e){var rr=e&&e.reason;logError("js-promise",(rr&&(rr.message||String(rr)))||"unbekannt");});
 document.addEventListener("DOMContentLoaded",init);
 })();
 </script>
