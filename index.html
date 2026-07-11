@@ -541,6 +541,7 @@ function logError(context,msg){
     if(!activeHousehold||!currentUser)return;
     msg=String(msg==null?"?":msg).slice(0,600);
     if(/fehlerprotokoll/i.test(msg))return; /* keine Schleifen über eigene Meldungen */
+    if(/^bitte\s/i.test(msg)||/funktioniert nur im browser/i.test(msg))return; /* Eingabe-Hinweise sind keine Fehler */
     sb.from("error_log").insert({household_id:activeHousehold,user_email:currentUser.email||null,context:String(context||"app").slice(0,60),message:msg})
       .then(function(){},function(){});
   }catch(e){}
@@ -1762,7 +1763,7 @@ function viewContractForm(){
    '<div><label class="f">Kosten (€)</label><input type="number" id="cf_kosten" min="0" step="0.01" value="'+escapeHtml(v("kosten","kosten"))+'"></div>'+
    '<div><label class="f">Zahlungsintervall</label><select id="cf_iv">'+ivOpts+'</select></div>'+
   '</div>'+
-  '<div id="cfDetails">'+detailFormHtml(kat,(c&&c.details)||p.details||{})+'</div>'+
+  '<div id="cfDetails">'+detailFormHtml(kat,(c&&c.details)||detailsFromExt(p)||{})+'</div>'+
   '<div id="cfPreview" class="ainote" hidden></div>'+
   '<label class="f">Notizen</label><textarea id="cf_notizen">'+escapeHtml(v("notizen"))+'</textarea>'+
   '<div class="btnrow"><button class="primary" data-action="save-contract">💾 Vertrag speichern</button><button class="ghost" data-nav="contracts">Abbrechen</button></div>'+
@@ -1817,8 +1818,12 @@ async function onSaveContract(){
     kosten_intervall:$("#cf_iv").value||"monatlich",
     notizen:($("#cf_notizen").value||"").trim()||null
   };
-  var cfDet=collectDetailInputs();
-  cols.details=Object.keys(cfDet).length?cfDet:null;
+  /* Zusatzangaben nur anfassen, wenn das Formular für diese Kategorie welche zeigt –
+     sonst blieben z. B. KFZ-Details beim Umstellen auf „Sonstiges" nicht erhalten */
+  if(document.querySelectorAll(".cfdet").length){
+    var cfDet=collectDetailInputs();
+    cols.details=Object.keys(cfDet).length?cfDet:null;
+  }
   var pf=$("#cf_person");cols.person_id=(pf&&pf.value)?pf.value:null;
   /* Plausibilitätsprüfung: der Butler warnt, blockiert aber nicht */
   var warns=[];
