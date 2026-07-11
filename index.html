@@ -225,6 +225,9 @@ body.dark .badge.fach{color:#67e8f9}
 
 /* ---- Butler-Tipps / Kosten-Aufschlüsselung ---- */
 .tiprow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 4px;border-bottom:1px solid var(--border);font-size:.9rem}
+.tipacts{display:flex;align-items:center;gap:6px;flex:none}
+.tipx{border:0;background:none;color:var(--muted);cursor:pointer;font-size:1rem;line-height:1;padding:6px;border-radius:8px}
+.tipx:hover{background:var(--panel2);color:var(--fg)}
 .tiprow:last-child{border-bottom:none}
 .tiprow button{flex:none;font-size:.8rem;padding:6px 10px}
 .kcat{display:flex;align-items:center;gap:10px;padding:6px 0;font-size:.88rem}
@@ -777,8 +780,80 @@ function compressImage(file){
   });
 }
 function isEmlFile(file){return file.type==="message/rfc822"||/\.eml$/i.test(file.name||"");}
-var importResults=[],importBusy=false,importCancel=false,importTotal=0,importDone=0;
-function modelPref(){try{return localStorage.getItem("db_model")==="advanced"?"advanced":"basic";}catch(e){return "basic";}}
+var importResults=[],importBusy=false,importCancel=false,importTotal=0,importDone=0,kiGuthabenHit=false;
+/* Edge-Funktion aufrufen und Guthaben-/Fehlercode sauber herausziehen (auch bei 402/429) */
+async function edgeExtract(reqBody){
+  var r=await sb.functions.invoke(EDGE_FN,{body:reqBody});
+  if(r.error){
+    var code=null,msg=null;
+    try{if(r.error.context&&typeof r.error.context.json==="function"){var jb=await r.error.context.json();if(jb){code=jb.code||null;msg=jb.error||null;}}}catch(e){}
+    var err=new Error(msg||errMsg(r.error));err.code=code;throw err;
+  }
+  var body=r.data||{};
+  if(body.error){var e2=new Error(body.error);e2.code=body.code||null;throw e2;}
+  return body;
+}
+/* KI-Analyse für ein gespeichertes Dokument nachholen (z. B. nachdem Guthaben wieder da ist) */
+async function applyExtractToDoc(docId,ext,body){
+  var d=DOCS.find(function(x){return x.id===docId;});
+  var pm=(ext&&ext.vertragspartner)?matchPerson(ext.vertragspartner):null;
+  var upd={extracted:ext,doc_type:(ext&&DOCTYPE[ext.docType])?ext.docType:"sonstiges",doc_date:(ext&&ext.datum)||null,zusammenfassung:(ext&&ext.zusammenfassung)||null,ki_pending:false};
+  if(pm)upd.person_id=pm.id;
+  if(ext&&ext.istMedizin){
+    upd.bereich="medizin";
+    upd.fachrichtung=(ext.fachrichtung&&FACH[ext.fachrichtung])?ext.fachrichtung:"sonstiges";
+    upd.arzt=ext.arzt||null;
+    upd.med_typ=(ext.medTyp&&MEDTYP[ext.medTyp])?ext.medTyp:(ext.docType==="rechnung"?"rechnung":"sonstiges");
+    upd.betrag=(ext.betrag!=null?Number(ext.betrag):null);
+    upd.behandlungsdatum=ext.datum||null;
+  }
+  await sb.from("documents").update(upd).eq("id",docId);
+  if(body){try{await sb.from("ai_usage").insert({household_id:activeHousehold,user_email:(currentUser&&currentUser.email)||null,model:body.modell||null,input_tokens:(body.usage&&typeof body.usage.input==="number")?body.usage.input:null,output_tokens:(body.usage&&typeof body.usage.output==="number")?body.usage.output:null,filename:(d&&d.filename)||"Nachanalyse"});}catch(e){}}
+  await autoFileDoc(docId,ext);
+}
+var reanalyzeBusy=false;
+async function reanalyzeDoc(docId){
+  var d=DOCS.find(function(x){return x.id===docId;});if(!d)return;
+  if(reanalyzeBusy)return;reanalyzeBusy=true;
+  toast("🎩 Analyse wird nachgeholt …");
+  try{
+    var dl=await sb.storage.from(BUCKET).download(d.storage_path);
+    if(dl.error)throw new Error("Datei konnte nicht geladen werden.");
+    var bytes=new Uint8Array(await dl.data.arrayBuffer());
+    var body=await edgeExtract({fileBase64:bytesToBase64(bytes),mimeType:d.mime_type||"application/pdf",model:modelPref()});
+    var ext=body.dokument||null;
+    if(!ext)throw new Error("Keine Auslesung erhalten.");
+    await applyExtractToDoc(docId,ext,body);
+    await loadFromDB();
+    closeModal();renderApp();
+    toast("Analyse nachgeholt ✅");
+  }catch(e){
+    if(e&&e.code==="ki_guthaben")toast("Das KI-Guthaben ist noch aufgebraucht. Bitte später erneut versuchen.",true);
+    else toast("Nachholen fehlgeschlagen: "+errMsg(e),true);
+  }finally{reanalyzeBusy=false;}
+}
+async function reanalyzeAllPending(){
+  var pend=DOCS.filter(function(d){return d.ki_pending;});
+  if(!pend.length){toast("Keine wartenden Dokumente.");return;}
+  if(reanalyzeBusy)return;reanalyzeBusy=true;
+  var ok=0,stop=false;
+  toast("🎩 "+pend.length+" Dokument(e) werden nachgeholt …");
+  for(var i=0;i<pend.length&&!stop;i++){
+    try{
+      var d=pend[i];
+      var dl=await sb.storage.from(BUCKET).download(d.storage_path);
+      if(dl.error)continue;
+      var bytes=new Uint8Array(await dl.data.arrayBuffer());
+      var body=await edgeExtract({fileBase64:bytesToBase64(bytes),mimeType:d.mime_type||"application/pdf",model:modelPref()});
+      if(body.dokument){await applyExtractToDoc(d.id,body.dokument,body);ok++;}
+    }catch(e){if(e&&e.code==="ki_guthaben"){stop=true;}}
+  }
+  reanalyzeBusy=false;
+  try{await loadFromDB();renderApp();}catch(e){}
+  if(stop)toast(ok+" nachgeholt – Guthaben erneut aufgebraucht.",true);
+  else toast(ok+" Dokument(e) nachträglich ausgelesen ✅");
+}
+function modelPref(){try{var v=localStorage.getItem("db_model");return (v==="advanced"||v==="ultra")?v:"basic";}catch(e){return "basic";}}
 
 /* Mehrere Dateien nacheinander automatisch einlesen + einsortieren */
 async function processFiles(files){
@@ -787,7 +862,7 @@ async function processFiles(files){
   if(!currentUser){pendingSharedFile=files[0];return;}
   if(!activeHousehold){toast("Kein Haushalt aktiv.",true);return;}
   if(importBusy){toast("Es läuft bereits ein Import – bitte warten oder abbrechen.",true);return;}
-  importResults=[];importBusy=true;importCancel=false;reviewDoc=null;activeView="add";renderApp();
+  importResults=[];importBusy=true;importCancel=false;kiGuthabenHit=false;reviewDoc=null;activeView="add";renderApp();
   var n=files.length;importTotal=n;importDone=0;
   for(var i=0;i<n;i++){
     if(importCancel)break;
@@ -890,13 +965,18 @@ async function ingest(opts){
   var docRow=ins.data,ext=null;
   try{
     var reqBody=opts.textContent?{textContent:opts.textContent,model:modelPref()}:{fileBase64:bytesToBase64(bytes),mimeType:opts.mime,model:modelPref()};
-    var r=await sb.functions.invoke(EDGE_FN,{body:reqBody});
-    if(r.error)throw r.error;
-    var body=r.data||{};if(body.error)throw new Error(body.error);
+    var body=await edgeExtract(reqBody);
     ext=body.dokument||null;
     /* Verbrauchsprotokoll (best effort): wer hat wann wie viele Tokens genutzt */
     if(ext){try{await sb.from("ai_usage").insert({household_id:activeHousehold,user_email:(currentUser&&currentUser.email)||null,model:body.modell||null,input_tokens:(body.usage&&typeof body.usage.input==="number")?body.usage.input:null,output_tokens:(body.usage&&typeof body.usage.output==="number")?body.usage.output:null,filename:opts.fname||null});}catch(e){}}
   }catch(e){
+    if(e&&e.code==="ki_guthaben"){
+      /* Guthaben leer: Dokument bleibt gespeichert, wird als „wartet auf KI" markiert */
+      kiGuthabenHit=true;
+      try{await sb.from("documents").update({ki_pending:true}).eq("id",docRow.id);}catch(_e){}
+      var resG={name:opts.fname||"Dokument",icon:"⏳",text:"gespeichert – KI-Guthaben ist aufgebraucht, die Analyse wird später nachgeholt",view:"docs",id:docRow.id};
+      importResults.push(resG);return resG;
+    }
     var res0={name:opts.fname||"Dokument",icon:"⚠️",text:"abgelegt, aber KI-Analyse fehlgeschlagen",view:"docs",id:docRow.id};
     importResults.push(res0);return res0;
   }
@@ -937,7 +1017,8 @@ var DETAIL_FIELDS={
     {k:"sfProzent",l:"SF-Beitragssatz (%)",t:"num"}
   ],
   kfz:[
-    {k:"fahrzeug",l:"Fahrzeug",t:"text"},
+    {k:"marke",l:"Marke",t:"text"},
+    {k:"modell",l:"Modell",t:"text"},
     {k:"kennzeichen",l:"Kennzeichen",t:"text"},
     {k:"deckungsart",l:"Deckung (Haftpflicht/Teil-/Vollkasko)",t:"text"},
     {k:"schadenfreiheitsklasse",l:"Schadenfreiheitsklasse (SF)",t:"text"},
@@ -957,12 +1038,11 @@ var DETAIL_FIELDS={
     {k:"zaehlernummer",l:"Zählernummer",t:"text"},
     {k:"jahresverbrauch",l:"Jahresverbrauch (kWh)",t:"num"},
     {k:"arbeitspreis",l:"Arbeitspreis (ct/kWh)",t:"num"},
-    {k:"grundpreis",l:"Grundpreis (€/Monat)",t:"num"},
-    {k:"abschlag",l:"Monatlicher Abschlag (€)",t:"eur"}
+    {k:"grundpreis",l:"Grundpreis (€/Monat)",t:"num"}
+    /* Kein „Abschlag" – der monatliche Abschlag ist bereits das Feld „Kosten" (monatlich). */
   ],
   wasser:[
-    {k:"zaehlernummer",l:"Zählernummer",t:"text"},
-    {k:"abschlag",l:"Monatlicher Abschlag (€)",t:"eur"}
+    {k:"zaehlernummer",l:"Zählernummer",t:"text"}
   ],
   streaming:[
     {k:"aboStufe",l:"Abo-Stufe",t:"text"},
@@ -1061,6 +1141,17 @@ async function autoFileDoc(docId,ext){
     if(!match.person_id&&d.person_id){
       try{await saveContractData({person_id:d.person_id},match.id);var pp0=personById(d.person_id);extraTxt=" · Person "+((pp0&&pp0.name)||"")+" zugeordnet";}catch(e){}
     }
+    /* Kern-Stammdaten am Vertrag nachtragen, wenn sie dort fehlen – so finden
+       weitere Batch-Dokumente denselben Vertrag über Kunden-/Vertragsnummer wieder */
+    try{
+      var fillCols={},nf=0;
+      FILL_MAP.forEach(function(f){
+        var ev=ext&&ext[f.ext];
+        if(ev!=null&&ev!==""&&(match[f.col]==null||match[f.col]===""))
+          {fillCols[f.col]=(ADJ_NUM&&ADJ_NUM[f.col])?Number(ev):ev;nf++;}
+      });
+      if(nf)await saveContractData(fillCols,match.id);
+    }catch(e){}
     /* neu erkannte kategorie-spezifische Angaben ergänzen (nur fehlende Schlüssel, nie überschreiben) */
     try{
       var mDet=detailsFromExt(ext);
@@ -1100,8 +1191,10 @@ function importSummaryCard(){
     var notes=(r.notes&&r.notes.length)?'<div class="behnote">⚠️ '+r.notes.map(escapeHtml).join(" · ")+'</div>':"";
     return '<div class="docrow"><span class="dicon">'+(r.icon||"📄")+'</span><div class="dbody"><div class="dname">'+escapeHtml(r.name)+'</div><div class="dsum">'+escapeHtml(r.text)+'</div>'+notes+'</div><div class="dact">'+act+'</div></div>';
   }).join("");
+  var guthabenNote=kiGuthabenHit?'<div class="ainote" style="background:color-mix(in srgb,#dc2626 8%,transparent);border-color:#dc2626">⚠️ Das <b>KI-Guthaben ist aufgebraucht</b>. Betroffene Dokumente sind gespeichert, aber noch nicht ausgelesen. Sobald wieder Guthaben da ist, kannst du die Analyse mit einem Klick nachholen (Hinweis erscheint auf der Übersicht und beim Dokument).</div>':"";
   return '<section class="card"><h2 class="sect">✅ Automatisch einsortiert</h2>'+
     '<p class="muted" style="font-size:.9rem;margin-bottom:8px">Der Butler hat '+importResults.length+' Dokument'+(importResults.length===1?"":"e")+' gelesen und passend einsortiert. Passt etwas nicht? Tippe auf „anpassen".</p>'+
+    guthabenNote+
     items+
     '<div class="btnrow"><button class="primary" data-action="import-more">➕ Weitere hochladen</button><button class="ghost" data-nav="dashboard">Fertig</button></div></section>';
 }
@@ -1223,14 +1316,17 @@ function findMatch(ext){
   var vn=(ext.vertragsnummer||"").replace(/\s+/g,"").toLowerCase();
   var ab=(ext.anbieter||"").toLowerCase();
   var best=null;
+  var exact=null,fuzzy=null;
   CONTRACTS.forEach(function(c){
     var ckd=(c.kundennummer||"").replace(/\s+/g,"").toLowerCase();
     var cvn=(c.vertragsnummer||"").replace(/\s+/g,"").toLowerCase();
-    if(kd&&ckd&&kd===ckd){best=c;return;}
-    if(vn&&cvn&&vn===cvn){best=c;return;}
-    if(!best&&ab&&c.anbieter&&(ab.indexOf(c.anbieter.toLowerCase())>=0||c.anbieter.toLowerCase().indexOf(ab)>=0)&&(ext.kategorie===c.kategorie))best=c;
+    /* Kunden-/Vertragsnummer eindeutig – auch über Kreuz (viele Anbieter fuehren beide gleich) */
+    if(!exact&&kd&&(kd===ckd||kd===cvn)){exact=c;return;}
+    if(!exact&&vn&&(vn===cvn||vn===ckd)){exact=c;return;}
+    /* sonst Anbietername + gleiche Kategorie */
+    if(!fuzzy&&ab&&c.anbieter&&(ab.indexOf(c.anbieter.toLowerCase())>=0||c.anbieter.toLowerCase().indexOf(ab)>=0)&&(ext.kategorie===c.kategorie))fuzzy=c;
   });
-  return best;
+  return exact||fuzzy;
 }
 /* Welche Angaben aus dem Dokument fehlen dem Vertrag noch? */
 var FILL_MAP=[
@@ -1370,7 +1466,7 @@ function renderTabs(){
   var t=$("#tabs");if(t)t.innerHTML=items;
   var f=$("#tabsFoot");if(f)f.innerHTML=navItem("settings","Einstellungen","⚙️");
   var m=$("#tabsMobile");if(m)m.innerHTML=navItem("dashboard","Start","🏠")+navItem("contracts","Verträge","📑")+navItem("gesundheit","Gesundheit","🩺")+navItem("add","Neu","➕")+navItem("docs","Doku","📁")+navItem("settings","Konto","⚙️");
-  var titles={dashboard:"Übersicht",contracts:"Verträge","contract-detail":"Vertrag","contract-form":(editId?"Vertrag bearbeiten":"Neuer Vertrag"),gesundheit:"Gesundheit","med-form":"Arzt-Dokument bearbeiten",docs:"Dokumente",add:"Dokument hinzufügen",settings:"Einstellungen"};
+  var titles={dashboard:"Übersicht",contracts:"Verträge","contract-detail":"Vertrag","contract-form":(editId?"Vertrag bearbeiten":"Neuer Vertrag"),gesundheit:"Gesundheit","med-form":"Arzt-Dokument bearbeiten",docs:"Dokumente",add:"Dokument hinzufügen",settings:"Einstellungen","ai-usage":"KI-Verbrauch"};
   var pt=$("#pageTitle");if(pt)pt.textContent=titles[activeView]||"Butler";
 }
 function renderApp(){
@@ -1386,6 +1482,7 @@ function renderApp(){
   else if(activeView==="docs")app.innerHTML=viewDocs();
   else if(activeView==="add")app.innerHTML=viewAdd();
   else if(activeView==="settings"){app.innerHTML=viewSettings();refreshHhMeta();}
+  else if(activeView==="ai-usage")app.innerHTML=viewAiUsage();
 }
 
 /* ---- Dashboard ---- */
@@ -1421,14 +1518,20 @@ function viewDashboard(){
     (DS.length>3?'<button class="linkbtn" data-nav="docs" style="margin-top:10px">Alle Dokumente ansehen ›</button>':"")+'</div></details></section>';
 }
 /* Butler-Tipps: proaktive Hinweise, wo der User etwas tun sollte */
+function tipsDismissed(){try{return JSON.parse(localStorage.getItem("db_tips_dismissed")||"[]");}catch(e){return [];}}
+function isTipDismissed(key){return tipsDismissed().indexOf(key)>=0;}
+function dismissTip(key){try{var s=tipsDismissed();if(s.indexOf(key)<0){s.push(key);localStorage.setItem("db_tips_dismissed",JSON.stringify(s.slice(-200)));}}catch(e){}renderApp();}
 function butlerTips(CS,DS){
   var tips=[];
+  /* Dokumente, die auf die KI-Analyse warten (Guthaben war aufgebraucht) */
+  var pend=DS.filter(function(d){return d.ki_pending;}).length;
+  if(pend)tips.push({key:"kipending:"+pend,txt:pend+(pend===1?" Dokument wartet":" Dokumente warten")+" auf die KI-Analyse (Guthaben war aufgebraucht). Sobald wieder Guthaben da ist, kannst du sie mit einem Klick auslesen lassen.",btn:"Jetzt nachholen",action:"reanalyze-all"});
   CS.forEach(function(c){
     var f=fristInfo(c);
     if(c.status==="aktiv"&&f.kind==="unbekannt")
-      tips.push({txt:'Bei „'+escapeHtml(c.anbieter||"?")+'“ fehlen Vertragsbeginn oder Mindestlaufzeit – ergänze sie, dann überwacht der Butler die Kündigungsfrist.',btn:"Ergänzen",action:"edit-contract",id:c.id});
+      tips.push({key:"frist:"+c.id,txt:'Bei „'+escapeHtml(c.anbieter||"?")+'“ fehlen Vertragsbeginn oder Mindestlaufzeit – ergänze sie, dann überwacht der Butler die Kündigungsfrist.',btn:"Ergänzen",action:"edit-contract",id:c.id});
     if(c.status==="gekuendigt"&&c.gekuendigt_zum&&c.gekuendigt_zum<todayISO())
-      tips.push({txt:'„'+escapeHtml(c.anbieter||"?")+'“ war zum '+fmtDate(c.gekuendigt_zum)+' gekündigt und ist inzwischen abgelaufen.',btn:"Als beendet markieren",action:"tip-ended",id:c.id});
+      tips.push({key:"ended:"+c.id,txt:'„'+escapeHtml(c.anbieter||"?")+'“ war zum '+fmtDate(c.gekuendigt_zum)+' gekündigt und ist inzwischen abgelaufen.',btn:"Als beendet markieren",action:"tip-ended",id:c.id});
   });
   /* Rechnungs-Trend: letzte Rechnung deutlich teurer als die davor */
   var trendIds={};
@@ -1439,7 +1542,7 @@ function butlerTips(CS,DS){
       var last=invs[invs.length-1].b,prev=invs[invs.length-2].b;
       if(last>prev&&(last-prev)>Math.max(1,prev*0.05)){
         trendIds[c.id]=1;
-        tips.push({txt:'Die letzte Rechnung von „'+escapeHtml(c.anbieter||"?")+'“ ist um '+fmtEur(last-prev)+' höher als die davor ('+fmtEur(prev)+' → '+fmtEur(last)+').',btn:"Verlauf ansehen",action:"open-contract",id:c.id});
+        tips.push({key:"trend:"+c.id,txt:'Die letzte Rechnung von „'+escapeHtml(c.anbieter||"?")+'“ ist um '+fmtEur(last-prev)+' höher als die davor ('+fmtEur(prev)+' → '+fmtEur(last)+').',btn:"Verlauf ansehen",action:"open-contract",id:c.id});
       }
     }
   });
@@ -1452,22 +1555,24 @@ function butlerTips(CS,DS){
     var cur=ys[yk[yk.length-1]],prev=ys[yk[yk.length-2]];
     var aC=cur.sum/cur.n,aP=prev.sum/prev.n;
     if(aC>aP&&(aC-aP)>Math.max(1,aP*0.05))
-      tips.push({txt:'„'+escapeHtml(c.anbieter||"?")+'“ kostet '+yk[yk.length-1]+' im Schnitt '+fmtEur(aC-aP)+' mehr je Rechnung als '+yk[yk.length-2]+' (⌀ '+fmtEur(aP)+' → ⌀ '+fmtEur(aC)+').',btn:"Jahresvergleich",action:"open-contract",id:c.id});
+      tips.push({key:"year:"+c.id,txt:'„'+escapeHtml(c.anbieter||"?")+'“ kostet '+yk[yk.length-1]+' im Schnitt '+fmtEur(aC-aP)+' mehr je Rechnung als '+yk[yk.length-2]+' (⌀ '+fmtEur(aP)+' → ⌀ '+fmtEur(aC)+').',btn:"Jahresvergleich",action:"open-contract",id:c.id});
   });
   var unlinked=DS.filter(function(d){return !isMed(d)&&!d.contract_id&&["vertrag","rechnung","police","preisaenderung","kuendigung"].indexOf(d.doc_type)>=0;}).length;
-  if(unlinked)tips.push({txt:unlinked+(unlinked===1?" Dokument ist":" Dokumente sind")+" noch keinem Vertrag zugeordnet – zugeordnet findet der Butler sie schneller wieder.",btn:"Ansehen",nav:"docs"});
+  if(unlinked)tips.push({key:"unlinked:"+unlinked,txt:unlinked+(unlinked===1?" Dokument ist":" Dokumente sind")+" noch keinem Vertrag zugeordnet – zugeordnet findet der Butler sie schneller wieder.",btn:"Ansehen",nav:"docs"});
   /* Dokumente ohne Person (nur wenn es überhaupt Personen gibt) */
   if(PERSONS.length){
     var noperson=DS.filter(function(d){return !d.person_id&&(isMed(d)||["vertrag","rechnung","police"].indexOf(d.doc_type)>=0);}).length;
-    if(noperson&&!activePerson)tips.push({txt:noperson+(noperson===1?" Dokument ist":" Dokumente sind")+" noch keiner Person zugeordnet – ordne sie zu, um klar zu trennen, wem was gehört.",btn:"Ansehen",nav:"docs"});
+    if(noperson&&!activePerson)tips.push({key:"noperson:"+noperson,txt:noperson+(noperson===1?" Dokument ist":" Dokumente sind")+" noch keiner Person zugeordnet – ordne sie zu, um klar zu trennen, wem was gehört.",btn:"Ansehen",nav:"docs"});
   }
+  /* bereits weggeklickte Tipps ausblenden (Tipps verschwinden ohnehin automatisch, wenn erledigt) */
+  tips=tips.filter(function(t){return !isTipDismissed(t.key);});
   if(!tips.length)return "";
   /* schlank: max. 2 Tipps zeigen, Rest auf Klick */
   var shown=tipsExpanded?tips:tips.slice(0,2);
   var more=(!tipsExpanded&&tips.length>2)?'<button class="linkbtn" data-action="tips-more" style="margin-top:10px">'+(tips.length-2)+' weitere Tipps anzeigen ›</button>':"";
   return '<section class="card"><h2 class="sect">🎩 Butler-Tipps</h2>'+shown.map(function(t){
-    var b=t.nav?'<button class="ghost" data-nav="'+t.nav+'">'+t.btn+'</button>':'<button class="ghost" data-action="'+t.action+'" data-id="'+t.id+'">'+t.btn+'</button>';
-    return '<div class="tiprow"><span>'+t.txt+'</span>'+b+'</div>';
+    var b=t.nav?'<button class="ghost" data-nav="'+t.nav+'">'+t.btn+'</button>':'<button class="ghost" data-action="'+t.action+'"'+(t.id?' data-id="'+t.id+'"':"")+'>'+t.btn+'</button>';
+    return '<div class="tiprow"><span>'+t.txt+'</span><span class="tipacts">'+b+'<button class="tipx" data-action="tip-dismiss" data-key="'+escapeHtml(t.key)+'" title="Tipp ausblenden">✕</button></span></div>';
   }).join("")+more+'</section>';
 }
 /* Monatskosten nach Kategorie (nur wenn mindestens 2 Kategorien Kosten haben) */
@@ -2227,9 +2332,11 @@ function modelCard(){
     '<div class="hhlist">'+
     opt("basic","Basis · schnell","Zügig und günstig – für die allermeisten Dokumente völlig ausreichend.")+
     opt("advanced","Fortgeschritten · genauer","Etwas langsamer, liest knifflige oder unübersichtliche Dokumente sorgfältiger.")+
+    opt("ultra","Ultra · höchste Genauigkeit","Das stärkste Modell – für sehr komplexe oder schwer lesbare Dokumente. Langsamer und teurer.")+
     '</div></section>';
 }
-function setModel(val){try{localStorage.setItem("db_model",val==="advanced"?"advanced":"basic");}catch(e){}if(activeView==="settings")renderApp();toast(val==="advanced"?"KI-Modell: Fortgeschritten ✅":"KI-Modell: Basis ✅");}
+var MODEL_LABEL={basic:"Basis",advanced:"Fortgeschritten",ultra:"Ultra"};
+function setModel(val){var v=(val==="advanced"||val==="ultra")?val:"basic";try{localStorage.setItem("db_model",v);}catch(e){}if(activeView==="settings")renderApp();toast("KI-Modell: "+MODEL_LABEL[v]+" ✅");}
 function exportJSON(){
   var data={exportiert:new Date().toISOString(),haushalt:activeHouseholdName(),contracts:CONTRACTS,documents:DOCS.map(function(d){var x={};for(var k in d)if(k!=="extracted")x[k]=d[k];return x;})};
   var blob=new Blob([JSON.stringify(data,null,2)],{type:"application/json"});
@@ -2634,8 +2741,13 @@ async function researchContract(cid){
   openModal('<h2 class="sect">🌐 Internet-Recherche</h2><div class="aiwork" style="justify-content:center"><span class="spin"></span><span class="aimsg">Der Butler recherchiert zu „'+escapeHtml(c.anbieter)+(c.produkt?" – "+escapeHtml(c.produkt):"")+'“ … das kann bis zu einer Minute dauern.</span></div>');
   try{
     var r=await sb.functions.invoke("butler-research",{body:{anbieter:c.anbieter,produkt:c.produkt||null,kategorie:c.kategorie||null,kosten:c.kosten,kostenIntervall:c.kosten_intervall||null,vertragsstart:c.vertragsstart||null,model:modelPref()}});
-    if(r.error)throw r.error;
-    var body=r.data||{};if(body.error)throw new Error(body.error);
+    if(r.error){
+      var rcode=null,rmsg=null;
+      try{if(r.error.context&&typeof r.error.context.json==="function"){var rjb=await r.error.context.json();if(rjb){rcode=rjb.code;rmsg=rjb.error;}}}catch(e){}
+      if(rcode==="ki_guthaben"){closeModal();toast("Das KI-Guthaben ist aufgebraucht – bitte später erneut recherchieren.",true);return;}
+      throw new Error(rmsg||errMsg(r.error));
+    }
+    var body=r.data||{};if(body.error){if(body.code==="ki_guthaben"){closeModal();toast("Das KI-Guthaben ist aufgebraucht – bitte später erneut recherchieren.",true);return;}throw new Error(body.error);}
     if(!body.recherche)throw new Error("Keine Rechercheergebnisse erhalten.");
     await saveContractData({recherche:body.recherche,recherche_am:new Date().toISOString()},cid);
     try{await sb.from("ai_usage").insert({household_id:activeHousehold,user_email:(currentUser&&currentUser.email)||null,model:body.modell||null,input_tokens:(body.usage&&typeof body.usage.input==="number")?body.usage.input:null,output_tokens:(body.usage&&typeof body.usage.output==="number")?body.usage.output:null,filename:"🌐 Recherche: "+(c.anbieter||"?")+((body.usage&&body.usage.searches)?" · "+body.usage.searches+" Suchen":"")});}catch(e){}
@@ -2661,6 +2773,33 @@ function rechercheFills(c){
   });
   return out;
 }
+/* Recherche-Ergebnisse NUR nach Bestätigung übernehmen (Checkbox-Dialog wie beim Abgleich) */
+var researchSugs=null;
+function openResearchFillModal(cid){
+  var c=contractById(cid);if(!c)return;
+  var sug=rechercheFills(c);
+  if(!sug.length){toast("Keine neuen Angaben aus der Recherche.");return;}
+  researchSugs={cid:cid,items:sug};
+  var rows=sug.map(function(s,i){
+    return '<label class="adjrow"><input type="checkbox" class="rescb" checked data-i="'+i+'">'+
+      '<span class="adjtxt"><b>'+s.label+':</b> <span class="adjarr">→</span> <b>'+adjFmt(s.col,s.val)+'</b>'+
+      '<span class="adjsrc">aus der Internet-Recherche · bitte prüfen</span></span></label>';
+  }).join("");
+  openModal('<h2 class="sect">🌐 Recherche-Angaben übernehmen</h2>'+
+    '<p class="muted" style="font-size:.85rem;margin:0 0 10px">Diese Angaben stammen aus öffentlicher Internet-Recherche und können vom individuell abgeschlossenen Vertrag abweichen. Wähle aus, was übernommen werden soll.</p>'+
+    rows+
+    '<div class="btnrow"><button class="primary" data-action="research-apply">Übernehmen</button><button class="ghost" data-action="modal-close">Abbrechen</button></div>');
+}
+async function applyResearchFill(){
+  var a=researchSugs;if(!a)return;
+  var boxes=Array.prototype.slice.call(document.querySelectorAll(".rescb"));
+  var cols={},n=0;
+  boxes.forEach(function(b){if(!b.checked)return;var s=a.items[parseInt(b.dataset.i,10)];if(!s)return;cols[s.col]=s.val;n++;});
+  closeModal();
+  if(!n){toast("Nichts ausgewählt.");return;}
+  try{await saveContractData(cols,a.cid);await loadFromDB();detailId=a.cid;activeView="contract-detail";renderApp();toast(n+" Angabe"+(n===1?"":"n")+" übernommen ✅");}
+  catch(e){toast("Übernehmen fehlgeschlagen: "+errMsg(e),true);}
+}
 function rechercheCard(c){
   if(!c.recherche)return "";
   var rc=c.recherche;
@@ -2679,7 +2818,7 @@ function rechercheCard(c){
 }
 
 /* ---------- KI-Verbrauch (Tokens, Kosten, Budget, Historie) ---------- */
-var AI_PRICE={"claude-haiku-4-5":{i:1,o:5},"claude-sonnet-5":{i:3,o:15}}; /* USD je Mio. Tokens */
+var AI_PRICE={"claude-haiku-4-5":{i:1,o:5},"claude-sonnet-5":{i:3,o:15},"claude-opus-4-8":{i:5,o:25}}; /* USD je Mio. Tokens */
 function aiUsageCost(u){ /* geschätzte Kosten in Cent */
   var p=AI_PRICE[u.model]||AI_PRICE["claude-haiku-4-5"];
   return ((u.input_tokens||0)*p.i+(u.output_tokens||0)*p.o)/10000;
@@ -2701,20 +2840,52 @@ function aiUsageCard(){
     bar='<div class="aibar"><div class="aibarfill'+(pct>=90?" warn":"")+'" style="width:'+Math.max(2,pct)+'%"></div></div>'+
       '<p style="font-size:.9rem;margin:6px 0 0">Übrig: <b>'+rest.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2})+' €</b> von '+budget.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2})+' € Monatsbudget'+(pct>=90?' <span class="badge red">fast aufgebraucht</span>':'')+'</p>';
   }
-  var hist=AIUSAGE.slice(0,8).map(function(u){
-    var d=new Date(u.created_at);
-    var when=isNaN(d)?"–":(d.toLocaleDateString("de-DE",{day:"2-digit",month:"2-digit"})+" "+d.toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}));
-    var who=(u.user_email||"?").split("@")[0];
-    return '<div class="airow"><span class="aiwhen">'+when+'</span><span class="aiwho">'+escapeHtml(who)+'</span><span class="aifile">'+escapeHtml(u.filename||"Dokument")+'</span><span class="aicostv">≈ '+fmtCent(aiUsageCost(u))+'</span></div>';
-  }).join("");
+  var hist=AIUSAGE.slice(0,5).map(aiRowHtml).join("");
   return '<section class="card"><h2 class="sect">🎛️ KI-Verbrauch</h2>'+
     '<p style="font-size:.92rem;margin:0 0 8px">Dieser Monat: <b>'+month.length+'</b> Analyse'+(month.length===1?"":"n")+' · '+toks.toLocaleString("de-DE")+' Tokens · <b>≈ '+fmtCent(cents)+'</b></p>'+
     bar+
     '<div class="gdpath" style="margin-top:12px"><input type="text" inputmode="decimal" id="ai_budget" value="'+(budget!=null?String(budget).replace(".",","):"")+'" placeholder="Monatsbudget in € (z. B. 2)"><button class="ghost" data-action="ai-budget-save" style="flex:none">Budget speichern</button></div>'+
     (AIUSAGE.length
-      ?('<div class="acclabel accsep">Letzte Analysen</div><div class="aihist">'+hist+'</div>'+(AIUSAGE.length>8?'<p class="muted" style="font-size:.78rem;margin-top:6px">… und '+(AIUSAGE.length-8)+' weitere (letzte 300 werden geführt).</p>':""))
+      ?('<div class="acclabel accsep">Letzte Analysen</div><div class="aihist">'+hist+'</div>'+(AIUSAGE.length>5?'<button class="linkbtn" data-nav="ai-usage" style="margin-top:8px">Gesamte Liste ansehen ›</button>':""))
       :'<p class="muted" style="font-size:.85rem;margin-top:10px">Noch keine Analysen protokolliert – ab jetzt schreibt der Butler jede KI-Analyse hier mit.</p>')+
     '<p class="muted" style="font-size:.78rem;margin-top:10px">Der Butler führt sein eigenes Verbrauchsprotokoll (das echte Anthropic-Guthaben lässt sich aus der App nicht auslesen). Kostenangaben sind Näherungswerte auf Dollar-Basis.</p>'+
+  '</section>';
+}
+function aiRowHtml(u){
+  var d=new Date(u.created_at);
+  var when=isNaN(d)?"–":(d.toLocaleDateString("de-DE",{day:"2-digit",month:"2-digit"})+" "+d.toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}));
+  var who=(u.user_email||"?").split("@")[0];
+  return '<div class="airow"><span class="aiwhen">'+when+'</span><span class="aiwho">'+escapeHtml(who)+'</span><span class="aifile">'+escapeHtml(u.filename||"Dokument")+'</span><span class="aicostv">≈ '+fmtCent(aiUsageCost(u))+'</span></div>';
+}
+/* Eigene Verbrauchsseite mit Suche + Filter (Nutzer/Monat) */
+var aiFilter={q:"",user:"",month:""};
+function viewAiUsage(){
+  var users={},months={};
+  AIUSAGE.forEach(function(u){var e=(u.user_email||"").split("@")[0];if(e)users[e]=1;var m=String(u.created_at).slice(0,7);if(/^\d{4}-\d{2}$/.test(m))months[m]=1;});
+  var q=(aiFilter.q||"").toLowerCase();
+  var list=AIUSAGE.filter(function(u){
+    if(aiFilter.user&&(u.user_email||"").split("@")[0]!==aiFilter.user)return false;
+    if(aiFilter.month&&String(u.created_at).slice(0,7)!==aiFilter.month)return false;
+    if(q&&(u.filename||"").toLowerCase().indexOf(q)<0)return false;
+    return true;
+  });
+  var cents=list.reduce(function(s,u){return s+aiUsageCost(u);},0);
+  var toks=list.reduce(function(s,u){return s+(u.input_tokens||0)+(u.output_tokens||0);},0);
+  function monLabel(m){var p=m.split("-");return ["Jan","Feb","Mär","Apr","Mai","Jun","Jul","Aug","Sep","Okt","Nov","Dez"][parseInt(p[1],10)-1]+" "+p[0];}
+  var userOpts='<option value="">Alle Nutzer</option>'+Object.keys(users).sort().map(function(u){return '<option value="'+escapeHtml(u)+'"'+(u===aiFilter.user?" selected":"")+'>'+escapeHtml(u)+'</option>';}).join("");
+  var monOpts='<option value="">Alle Monate</option>'+Object.keys(months).sort().reverse().map(function(m){return '<option value="'+m+'"'+(m===aiFilter.month?" selected":"")+'>'+monLabel(m)+'</option>';}).join("");
+  var rows=list.length?list.map(aiRowHtml).join(""):'<p class="muted" style="font-size:.88rem">Keine Einträge für diese Auswahl.</p>';
+  return '<button class="linkbtn" data-nav="settings" style="margin-bottom:12px">← Einstellungen</button>'+
+    '<section class="card"><h2 class="sect">🎛️ KI-Verbrauch – gesamte Liste</h2>'+
+    '<p style="font-size:.9rem;margin:0 0 10px">Auswahl: <b>'+list.length+'</b> Analyse'+(list.length===1?"":"n")+' · '+toks.toLocaleString("de-DE")+' Tokens · <b>≈ '+fmtCent(cents)+'</b></p>'+
+    '<div class="formrow" style="margin-bottom:8px">'+
+      '<div><input type="search" id="ai_q" value="'+escapeHtml(aiFilter.q)+'" placeholder="🔎 Dokument suchen …"></div>'+
+      '<div><select id="ai_fuser">'+userOpts+'</select></div>'+
+      '<div><select id="ai_fmonth">'+monOpts+'</select></div>'+
+    '</div>'+
+    (aiFilter.q||aiFilter.user||aiFilter.month?'<button class="linkbtn" data-action="ai-filter-reset" style="margin:0 0 8px">Filter zurücksetzen</button>':"")+
+    '<div class="aihist">'+rows+'</div>'+
+    '<p class="muted" style="font-size:.78rem;margin-top:10px">Es werden die letzten 300 Analysen geführt. Kostenangaben sind Näherungswerte.</p>'+
   '</section>';
 }
 
@@ -2935,7 +3106,7 @@ function gdriveCard(){
 /* ---------- Modal-Dialoge (ersetzen die Browser-Prompts) ---------- */
 var modalCb=null;
 function openModal(html){var w=$("#modal");if(!w)return;$("#modalBox").innerHTML=html;w.hidden=false;document.body.classList.add("modal-open");}
-function closeModal(){var w=$("#modal");if(!w)return;w.hidden=true;$("#modalBox").innerHTML="";modalCb=null;adjustSugs=null;document.body.classList.remove("modal-open");}
+function closeModal(){var w=$("#modal");if(!w)return;w.hidden=true;$("#modalBox").innerHTML="";modalCb=null;adjustSugs=null;researchSugs=null;document.body.classList.remove("modal-open");}
 function askModal(title,label,value,type,btnLabel,cb){
   modalCb=cb;
   openModal('<h2 class="sect">'+title+'</h2><label class="f">'+label+'</label><input type="'+(type||"text")+'" id="mq_input" value="'+escapeHtml(value==null?"":value)+'">'+
@@ -2966,17 +3137,46 @@ function openDocDetail(id){
     (d.note?dRow("Notiz",escapeHtml(d.note)):"")+
   '</div>';
   var wichtig=(Array.isArray(ext.wichtig)&&ext.wichtig.length)?'<ul class="wichtig">'+ext.wichtig.map(function(w){return '<li>'+escapeHtml(w)+'</li>';}).join("")+'</ul>':"";
+  var pendNote=d.ki_pending?'<div class="ainote" style="background:color-mix(in srgb,#dc2626 8%,transparent);border-color:#dc2626">⏳ Dieses Dokument wartet noch auf die KI-Analyse (Guthaben war aufgebraucht). <button class="linkbtn" data-action="reanalyze-doc" data-id="'+d.id+'" style="display:inline">Jetzt nachholen</button></div>':"";
   openModal('<h2 class="sect">'+t.icon+' '+escapeHtml(d.filename||"Dokument")+'</h2>'+
+    pendNote+
     (d.zusammenfassung?'<p style="margin:4px 0 8px">'+escapeHtml(d.zusammenfassung)+'</p>':"")+
     wichtig+(ext.hinweise?'<div class="ainote">💡 '+escapeHtml(ext.hinweise)+'</div>':"")+rows+
     '<div class="btnrow">'+
     '<button class="primary" data-action="doc-view" data-id="'+d.id+'">👁️ Ansehen</button>'+
+    '<button class="ghost" data-action="doc-share" data-id="'+d.id+'">📤 Teilen</button>'+
     '<button class="ghost" data-action="doc-edit" data-id="'+d.id+'">✏️ Bearbeiten</button>'+
     '<button class="ghost" data-action="doc-link" data-id="'+d.id+'">🔗 Zuordnen</button>'+
     (c?'<button class="ghost" data-action="open-contract" data-id="'+c.id+'">📑 Zum Vertrag</button>':"")+
     '<button class="ghost" data-action="to-med" data-id="'+d.id+'" title="In den Gesundheitsbereich verschieben">🩺</button>'+
     '<button class="danger" data-action="doc-del" data-id="'+d.id+'">🗑️</button>'+
     '<button class="ghost" data-action="modal-close">Schließen</button></div>');
+}
+/* Dokument teilen: nativ per Web Share API (mit Datei), sonst signierte Ansehen-URL */
+async function shareDoc(docId){
+  var d=DOCS.find(function(x){return x.id===docId;});if(!d)return;
+  toast("Wird zum Teilen vorbereitet …");
+  try{
+    var canFiles=false;
+    try{
+      var dl=await sb.storage.from(BUCKET).download(d.storage_path);
+      if(!dl.error&&dl.data){
+        var file=new File([dl.data],d.filename||"dokument",{type:d.mime_type||dl.data.type||"application/octet-stream"});
+        if(navigator.canShare&&navigator.canShare({files:[file]})){
+          await navigator.share({files:[file],title:d.filename||"Dokument"});
+          canFiles=true;
+        }
+      }
+    }catch(e){if(e&&e.name==="AbortError")return;}
+    if(canFiles)return;
+    /* Fallback: signierte Ansehen-URL (7 Tage) teilen/kopieren */
+    var su=await sb.storage.from(BUCKET).createSignedUrl(d.storage_path,604800);
+    if(su.error)throw su.error;
+    var url=su.data.signedUrl;
+    if(navigator.share){try{await navigator.share({title:d.filename||"Dokument",url:url});return;}catch(e){if(e&&e.name==="AbortError")return;}}
+    try{await navigator.clipboard.writeText(url);toast("Link kopiert (7 Tage gültig) ✅");}
+    catch(e){window.open(url,"_blank");}
+  }catch(e){toast("Teilen fehlgeschlagen: "+errMsg(e),true);}
 }
 function openDocEdit(id){
   var d=DOCS.find(function(x){return x.id===id;});if(!d)return;
@@ -3100,6 +3300,9 @@ function onAppClick(e){
   else if(act==="mark-active")setContractStatus(id,"aktiv");
   else if(act==="ics"){var c=contractById(id);if(c)icsDownload(c);}
   else if(act==="doc-view")viewDoc(id);
+  else if(act==="doc-share")shareDoc(id);
+  else if(act==="reanalyze-doc")reanalyzeDoc(id);
+  else if(act==="reanalyze-all")reanalyzeAllPending();
   else if(act==="doc-del"){closeModal();deleteDoc(id);}
   else if(act==="doc-link")openLinkPicker(id);
   else if(act==="doc-open")openDocDetail(id);
@@ -3116,19 +3319,13 @@ function onAppClick(e){
   else if(act==="adjust-contract")openAdjustModal(id,"");
   else if(act==="adjust-apply")applyAdjust();
   else if(act==="research-contract")researchContract(id);
-  else if(act==="research-fill"){
-    (async function(){
-      var rfc=contractById(id);if(!rfc)return;
-      var rfills=rechercheFills(rfc);if(!rfills.length)return;
-      var rcols={};rfills.forEach(function(f){rcols[f.col]=f.val;});
-      try{await saveContractData(rcols,id);await loadFromDB();renderApp();toast(rfills.length+" Angabe"+(rfills.length===1?"":"n")+" ergänzt ✅");}
-      catch(e){toast("Ergänzen fehlgeschlagen: "+errMsg(e),true);}
-    })();
-  }
+  else if(act==="research-fill")openResearchFillModal(id);
+  else if(act==="research-apply")applyResearchFill();
   else if(act==="mq-ok"){var mqv=$("#mq_input")?$("#mq_input").value:"";var mqcb=modalCb;modalCb=null;closeModal();if(mqcb)mqcb(mqv);}
   else if(act==="modal-close")closeModal();
   else if(act==="to-med"){closeModal();toMedical(id);}
   else if(act==="tips-more"){tipsExpanded=true;renderApp();}
+  else if(act==="tip-dismiss"){dismissTip(b.dataset.key);}
   else if(act==="add-for-contract"){uploadTarget=id;reviewDoc=null;importResults=[];activeView="add";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
   else if(act==="clear-upload-target"){uploadTarget=null;renderApp();}
   else if(act==="med-edit"){medEditId=id;if(reviewDoc&&reviewDoc.id===id)reviewDoc=null;activeView="med-form";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
@@ -3176,6 +3373,7 @@ function onAppClick(e){
   else if(act==="pin-remove"){if(confirm("PIN wirklich entfernen? Die App ist dann ohne Sperre zugänglich.")){removePin();renderApp();toast("PIN entfernt");}}
   else if(act==="gd-save")saveGdriveConfig();
   else if(act==="gd-import")gdriveImport();
+  else if(act==="ai-filter-reset"){aiFilter={q:"",user:"",month:""};renderApp();}
   else if(act==="ai-budget-save"){
     var abi=$("#ai_budget"),abv=abi?(abi.value||"").trim():"";
     var abn=parseFloat(abv.replace(",","."));
@@ -3228,11 +3426,15 @@ function onAppChange(e){
   else if(e.target.id==="mf_jahr"){medFilter.jahr=e.target.value;renderApp();}
   else if(e.target.id==="mf_sort"){medFilter.sort=e.target.value;renderApp();}
   else if(e.target.id==="bioToggle"){toggleBiometric(e.target.checked);}
+  else if(e.target.id==="ai_fuser"){aiFilter.user=e.target.value;renderApp();}
+  else if(e.target.id==="ai_fmonth"){aiFilter.month=e.target.value;renderApp();}
 }
 function onAppInput(e){
   if(e.target.id&&e.target.id.indexOf("cf_")===0){updateFormPreview();return;}
   if(e.target.id==="df_q"){docFilter.q=e.target.value;
-    clearTimeout(onAppInput._t);onAppInput._t=setTimeout(function(){var el=$("#df_q");var pos=el?el.selectionStart:0;renderApp();var el2=$("#df_q");if(el2){el2.focus();el2.setSelectionRange(pos,pos);}},350);}
+    clearTimeout(onAppInput._t);onAppInput._t=setTimeout(function(){var el=$("#df_q");var pos=el?el.selectionStart:0;renderApp();var el2=$("#df_q");if(el2){el2.focus();el2.setSelectionRange(pos,pos);}},350);return;}
+  if(e.target.id==="ai_q"){aiFilter.q=e.target.value;
+    clearTimeout(onAppInput._a);onAppInput._a=setTimeout(function(){var el=$("#ai_q");var pos=el?el.selectionStart:0;renderApp();var el2=$("#ai_q");if(el2){el2.focus();try{el2.setSelectionRange(pos,pos);}catch(_e){}}},350);}
 }
 
 /* ---------- Init ---------- */
