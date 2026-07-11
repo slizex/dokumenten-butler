@@ -310,6 +310,16 @@ body.modal-open{overflow:hidden}
 .gdrow input{accent-color:var(--accent);flex:none}
 .gdrow .gdname{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
 .gdrow .gdimp{font-size:.75rem;color:var(--muted);flex:none}
+.aibar{height:10px;border-radius:6px;background:var(--panel2);border:1px solid var(--border);overflow:hidden}
+.aibarfill{height:100%;background:var(--accent);border-radius:6px;transition:width .3s}
+.aibarfill.warn{background:#dc2626}
+.aihist{margin-top:4px}
+.airow{display:flex;align-items:center;gap:10px;padding:7px 2px;border-bottom:1px solid var(--border);font-size:.85rem}
+.airow:last-child{border-bottom:0}
+.airow .aiwhen{color:var(--muted);flex:none;font-variant-numeric:tabular-nums}
+.airow .aiwho{flex:none;font-weight:600;max-width:110px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.airow .aifile{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--muted)}
+.airow .aicostv{flex:none;font-variant-numeric:tabular-nums}
 @media(max-width:620px){
  .modalwrap{align-items:flex-end;padding:0}
  .modalbox{border-radius:20px 20px 0 0;max-width:none;max-height:88vh;border-left:none;border-right:none;border-bottom:none}
@@ -476,7 +486,7 @@ var NEUES_RECHT_AB="2022-03-01";
 /* ---------- Zustand ---------- */
 var currentUser=null,enteredUserId=null;
 var HOUSEHOLDS=[],activeHousehold=null;
-var CONTRACTS=[],DOCS=[],PERSONS=[];
+var CONTRACTS=[],DOCS=[],PERSONS=[],AIUSAGE=[];
 var activeView="dashboard";
 var activePerson="";        /* Personen-Filter: "" = alle */
 var detailId=null;          /* geöffneter Vertrag */
@@ -593,18 +603,20 @@ function icsEsc(s){return String(s).replace(/\\/g,"\\\\").replace(/;/g,"\\;").re
 
 /* ---------- Datenzugriff ---------- */
 async function loadFromDB(){
-  if(!activeHousehold){CONTRACTS=[];DOCS=[];PERSONS=[];return;}
-  /* alle drei Tabellen parallel laden (eine Runde statt drei) */
+  if(!activeHousehold){CONTRACTS=[];DOCS=[];PERSONS=[];AIUSAGE=[];return;}
+  /* alle Tabellen parallel laden (eine Runde statt vier) */
   var res=await Promise.all([
     sb.from("persons").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:true}),
     sb.from("contracts").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:false}),
-    sb.from("documents").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:false})
+    sb.from("documents").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:false}),
+    sb.from("ai_usage").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:false}).limit(300)
   ]);
   PERSONS=(res[0]&&!res[0].error&&res[0].data)?res[0].data:[];
   if(res[1].error)throw res[1].error;
   CONTRACTS=res[1].data||[];
   if(res[2].error)throw res[2].error;
   DOCS=res[2].data||[];
+  AIUSAGE=(res[3]&&!res[3].error&&res[3].data)?res[3].data:[];
   if(activePerson&&!PERSONS.some(function(p){return p.id===activePerson;}))activePerson="";
   lastLoad=Date.now();
 }
@@ -849,6 +861,8 @@ async function ingest(opts){
     if(r.error)throw r.error;
     var body=r.data||{};if(body.error)throw new Error(body.error);
     ext=body.dokument||null;
+    /* Verbrauchsprotokoll (best effort): wer hat wann wie viele Tokens genutzt */
+    if(ext){try{await sb.from("ai_usage").insert({household_id:activeHousehold,user_email:(currentUser&&currentUser.email)||null,model:body.modell||null,input_tokens:(body.usage&&typeof body.usage.input==="number")?body.usage.input:null,output_tokens:(body.usage&&typeof body.usage.output==="number")?body.usage.output:null,filename:opts.fname||null});}catch(e){}}
   }catch(e){
     var res0={name:opts.fname||"Dokument",icon:"⚠️",text:"abgelegt, aber KI-Analyse fehlgeschlagen",view:"docs",id:docRow.id};
     importResults.push(res0);return res0;
@@ -1240,8 +1254,8 @@ function viewDashboard(){
     '</div>'+
     butlerTips(CS,DS)+
     '<section class="card"><h2 class="sect">⏰ Fristen im Blick</h2>'+fr+'</section>'+
-    '<section class="card"><h2 class="sect">🕘 Zuletzt hinzugefügt</h2>'+recent+
-    (DS.length>3?'<button class="linkbtn" data-nav="docs" style="margin-top:10px">Alle Dokumente ansehen ›</button>':"")+'</section>';
+    '<section class="card"><details><summary style="cursor:pointer;font-weight:650;font-size:1rem">🕘 Zuletzt hinzugefügt'+(DS.length?' <span class="muted" style="font-weight:400;font-size:.85rem">('+Math.min(3,DS.length)+' anzeigen)</span>':"")+'</summary><div style="margin-top:10px">'+recent+
+    (DS.length>3?'<button class="linkbtn" data-nav="docs" style="margin-top:10px">Alle Dokumente ansehen ›</button>':"")+'</div></details></section>';
 }
 /* Butler-Tipps: proaktive Hinweise, wo der User etwas tun sollte */
 function butlerTips(CS,DS){
@@ -2004,6 +2018,7 @@ function viewSettings(){
     '<div class="btnrow"><button class="ghost" data-action="export-json">⬇️ Vertragsdaten exportieren (JSON)</button></div>'+
   '</section>'+
   modelCard()+
+  aiUsageCard()+
   gdriveCard()+
   securityCard()+
   '<section class="card"><details><summary style="cursor:pointer;font-weight:650;font-size:1rem">ℹ️ Wie rechnet der Butler?</summary>'+
@@ -2363,6 +2378,46 @@ function securityCard(){
       '<label style="display:flex;align-items:center;gap:10px;margin-top:14px;font-size:.95rem;cursor:pointer"><input type="checkbox" id="bioToggle" style="width:auto"'+(bioEnabled()?" checked":"")+'> Mit Fingerabdruck / Gesicht entsperren</label>'
       :
       '<div class="btnrow"><button class="primary" data-action="pin-set">🔒 PIN einrichten</button></div>')+
+  '</section>';
+}
+
+/* ---------- KI-Verbrauch (Tokens, Kosten, Budget, Historie) ---------- */
+var AI_PRICE={"claude-haiku-4-5":{i:1,o:5},"claude-sonnet-5":{i:3,o:15}}; /* USD je Mio. Tokens */
+function aiUsageCost(u){ /* geschätzte Kosten in Cent */
+  var p=AI_PRICE[u.model]||AI_PRICE["claude-haiku-4-5"];
+  return ((u.input_tokens||0)*p.i+(u.output_tokens||0)*p.o)/10000;
+}
+function fmtCent(c){
+  if(c>=100)return (c/100).toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2})+" €";
+  return c.toLocaleString("de-DE",{maximumFractionDigits:c<1?2:1})+" ct";
+}
+function aiBudget(){try{var v=parseFloat((localStorage.getItem("db_ai_budget")||"").replace(",","."));return (v>0)?v:null;}catch(e){return null;}}
+function aiUsageCard(){
+  var mon=todayISO().slice(0,7);
+  var month=AIUSAGE.filter(function(u){return String(u.created_at).slice(0,7)===mon;});
+  var cents=month.reduce(function(s,u){return s+aiUsageCost(u);},0);
+  var toks=month.reduce(function(s,u){return s+(u.input_tokens||0)+(u.output_tokens||0);},0);
+  var budget=aiBudget(),bar="";
+  if(budget){
+    var used=cents/100,pct=Math.min(100,Math.round(used/budget*100));
+    var rest=Math.max(0,budget-used);
+    bar='<div class="aibar"><div class="aibarfill'+(pct>=90?" warn":"")+'" style="width:'+Math.max(2,pct)+'%"></div></div>'+
+      '<p style="font-size:.9rem;margin:6px 0 0">Übrig: <b>'+rest.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2})+' €</b> von '+budget.toLocaleString("de-DE",{minimumFractionDigits:2,maximumFractionDigits:2})+' € Monatsbudget'+(pct>=90?' <span class="badge red">fast aufgebraucht</span>':'')+'</p>';
+  }
+  var hist=AIUSAGE.slice(0,8).map(function(u){
+    var d=new Date(u.created_at);
+    var when=isNaN(d)?"–":(d.toLocaleDateString("de-DE",{day:"2-digit",month:"2-digit"})+" "+d.toLocaleTimeString("de-DE",{hour:"2-digit",minute:"2-digit"}));
+    var who=(u.user_email||"?").split("@")[0];
+    return '<div class="airow"><span class="aiwhen">'+when+'</span><span class="aiwho">'+escapeHtml(who)+'</span><span class="aifile">'+escapeHtml(u.filename||"Dokument")+'</span><span class="aicostv">≈ '+fmtCent(aiUsageCost(u))+'</span></div>';
+  }).join("");
+  return '<section class="card"><h2 class="sect">🎛️ KI-Verbrauch</h2>'+
+    '<p style="font-size:.92rem;margin:0 0 8px">Dieser Monat: <b>'+month.length+'</b> Analyse'+(month.length===1?"":"n")+' · '+toks.toLocaleString("de-DE")+' Tokens · <b>≈ '+fmtCent(cents)+'</b></p>'+
+    bar+
+    '<div class="gdpath" style="margin-top:12px"><input type="text" inputmode="decimal" id="ai_budget" value="'+(budget!=null?String(budget).replace(".",","):"")+'" placeholder="Monatsbudget in € (z. B. 2)"><button class="ghost" data-action="ai-budget-save" style="flex:none">Budget speichern</button></div>'+
+    (AIUSAGE.length
+      ?('<div class="acclabel accsep">Letzte Analysen</div><div class="aihist">'+hist+'</div>'+(AIUSAGE.length>8?'<p class="muted" style="font-size:.78rem;margin-top:6px">… und '+(AIUSAGE.length-8)+' weitere (letzte 300 werden geführt).</p>':""))
+      :'<p class="muted" style="font-size:.85rem;margin-top:10px">Noch keine Analysen protokolliert – ab jetzt schreibt der Butler jede KI-Analyse hier mit.</p>')+
+    '<p class="muted" style="font-size:.78rem;margin-top:10px">Der Butler führt sein eigenes Verbrauchsprotokoll (das echte Anthropic-Guthaben lässt sich aus der App nicht auslesen). Kostenangaben sind Näherungswerte auf Dollar-Basis.</p>'+
   '</section>';
 }
 
@@ -2809,6 +2864,13 @@ function onAppClick(e){
   else if(act==="pin-remove"){if(confirm("PIN wirklich entfernen? Die App ist dann ohne Sperre zugänglich.")){removePin();renderApp();toast("PIN entfernt");}}
   else if(act==="gd-save")saveGdriveConfig();
   else if(act==="gd-import")gdriveImport();
+  else if(act==="ai-budget-save"){
+    var abi=$("#ai_budget"),abv=abi?(abi.value||"").trim():"";
+    var abn=parseFloat(abv.replace(",","."));
+    if(abv&&(!(abn>0))){toast("Bitte eine Zahl größer 0 eingeben (oder leer lassen zum Entfernen).",true);return;}
+    try{if(abv)localStorage.setItem("db_ai_budget",abv);else localStorage.removeItem("db_ai_budget");}catch(e){}
+    renderApp();toast(abv?"Monatsbudget gespeichert ✅":"Monatsbudget entfernt ✅");
+  }
   else if(act==="gdrive-browse")openGdriveBrowse();
   else if(act==="gd-folder")gdriveNav(id,b.dataset.name||"Ordner",false);
   else if(act==="gd-crumb")gdriveCrumb(parseInt(b.dataset.i,10));
