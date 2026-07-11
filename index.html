@@ -294,6 +294,12 @@ body.modal-open{overflow:hidden}
 .pickrow .pkt{font-weight:600;font-size:.92rem}
 .pickrow .pks{font-size:.79rem;color:var(--muted)}
 .pickrow>div{min-width:0;flex:1}
+.adjrow{display:flex;align-items:flex-start;gap:11px;width:100%;padding:11px 12px;border:1px solid var(--border);border-radius:11px;background:var(--panel);cursor:pointer;margin:0 0 8px}
+.adjrow:hover{background:var(--panel2)}
+.adjrow input{margin-top:3px;accent-color:var(--accent);flex:none}
+.adjrow .adjtxt{font-size:.92rem;min-width:0}
+.adjrow .adjarr{color:var(--muted)}
+.adjrow .adjsrc{display:block;font-size:.78rem;color:var(--muted);margin-top:2px}
 @media(max-width:620px){
  .modalwrap{align-items:flex-end;padding:0}
  .modalbox{border-radius:20px 20px 0 0;max-width:none;max-height:88vh;border-left:none;border-right:none;border-bottom:none}
@@ -698,10 +704,16 @@ async function viewDoc(docId){
 async function deleteDoc(docId){
   var d=DOCS.find(function(x){return x.id===docId;});if(!d)return;
   if(!confirm("Dokument „"+(d.filename||"?")+"“ endgültig löschen?"))return;
+  var adjCid=(d.contract_id&&d.extracted)?d.contract_id:null;
   try{
     try{await sb.storage.from(BUCKET).remove([d.storage_path]);}catch(e){}
     var r=await sb.from("documents").delete().eq("id",docId);if(r.error)throw r.error;
     await loadFromDB();renderApp();toast("Dokument gelöscht ✅");
+    /* Neu rechnen: weichen die verbleibenden Dokumente jetzt vom Vertrag ab? */
+    if(adjCid){
+      var c=contractById(adjCid);
+      if(c&&contractAdjustSugs(c).length)openAdjustModal(adjCid,"Das gelöschte Dokument war diesem Vertrag zugeordnet. Aus den verbleibenden Dokumenten ergeben sich abweichende Angaben:");
+    }
   }catch(e){toast("Löschen fehlgeschlagen: "+errMsg(e),true);}
 }
 
@@ -1051,6 +1063,71 @@ function missingFills(c,ext){
 async function linkDocSilent(docId,contractId){
   try{await sb.from("documents").update({contract_id:contractId}).eq("id",docId);}catch(e){}
 }
+/* Vertrag anhand der zugeordneten Dokumente neu berechnen: neuestes Dokument je Angabe gewinnt */
+var adjustSugs=null;
+var ADJ_NUM={mindestlaufzeit_monate:1,kuendigungsfrist_monate:1,verlaengerung_monate:1,kosten:1};
+function docExtractDate(d){var e=d.extracted||{};return e.zeitraumBis||e.datum||d.doc_date||String(d.created_at).slice(0,10);}
+function contractAdjustSugs(c){
+  var docs=DOCS.filter(function(d){return d.contract_id===c.id&&d.extracted;})
+    .sort(function(a,b){return String(docExtractDate(b)).localeCompare(String(docExtractDate(a)));});
+  if(!docs.length)return [];
+  var sugs=[];
+  FILL_MAP.forEach(function(f){
+    for(var i=0;i<docs.length;i++){
+      var e=docs[i].extracted,v=e[f.ext];
+      if(v==null||v==="")continue;
+      if(ADJ_NUM[f.col]&&isNaN(Number(v)))continue;
+      var cur=c[f.col],same;
+      if(ADJ_NUM[f.col])same=(cur!=null&&cur!==""&&Math.abs(Number(cur)-Number(v))<0.005);
+      else same=(String(cur==null?"":cur).trim().toLowerCase()===String(v).trim().toLowerCase());
+      if(!same){
+        var s={col:f.col,val:ADJ_NUM[f.col]?Number(v):String(v).trim(),label:f.label,cur:cur,src:docs[i].filename||"Dokument",date:docExtractDate(docs[i])};
+        if(f.col==="kosten"&&e.kostenIntervall&&INTERVALL_LABEL[e.kostenIntervall]&&e.kostenIntervall!==c.kosten_intervall)s.iv=e.kostenIntervall;
+        sugs.push(s);
+      }
+      break; /* nur das neueste Dokument mit dieser Angabe zählt */
+    }
+  });
+  return sugs;
+}
+function adjFmt(col,v){
+  if(v==null||v==="")return "–";
+  if(col==="kosten")return fmtEur(Number(v));
+  if(col==="vertragsstart")return fmtDate(v);
+  if(col==="kuendigungsfrist_monate")return fristTxt(Number(v));
+  if(col==="mindestlaufzeit_monate"||col==="verlaengerung_monate")return Number(v)+" Mon.";
+  return escapeHtml(String(v));
+}
+function openAdjustModal(cid,note){
+  var c=contractById(cid);if(!c)return;
+  var sugs=contractAdjustSugs(c);
+  if(!sugs.length){toast("Alles aktuell – die Dokumente enthalten keine abweichenden Angaben ✅");return;}
+  adjustSugs={cid:cid,items:sugs};
+  var rows=sugs.map(function(s,i){
+    return '<label class="adjrow"><input type="checkbox" class="adjcb" checked data-i="'+i+'">'+
+      '<span class="adjtxt"><b>'+s.label+':</b> '+adjFmt(s.col,s.cur)+' <span class="adjarr">→</span> <b>'+adjFmt(s.col,s.val)+(s.iv?' / '+INTERVALL_LABEL[s.iv]:"")+'</b>'+
+      '<span class="adjsrc">aus „'+escapeHtml(s.src)+'“'+(s.date?' · '+fmtDate(s.date):"")+'</span></span></label>';
+  }).join("");
+  openModal('<h2 class="sect">🔄 Vertrag aus Dokumenten aktualisieren</h2>'+
+    (note?'<p class="ainote" style="margin:0 0 10px">'+note+'</p>':"")+
+    '<p class="muted" style="font-size:.85rem;margin:0 0 10px">Der Butler hat alle zugeordneten Dokumente ausgewertet (neueste Angabe gewinnt). Abwählen, was nicht übernommen werden soll.</p>'+
+    rows+
+    '<div class="btnrow"><button class="primary" data-action="adjust-apply">Übernehmen</button><button class="ghost" data-action="modal-close">Abbrechen</button></div>');
+}
+async function applyAdjust(){
+  var a=adjustSugs;if(!a)return;
+  var boxes=Array.prototype.slice.call(document.querySelectorAll(".adjcb"));
+  var cols={},n=0;
+  boxes.forEach(function(b){if(!b.checked)return;var s=a.items[parseInt(b.dataset.i,10)];if(!s)return;cols[s.col]=s.val;if(s.iv)cols.kosten_intervall=s.iv;n++;});
+  closeModal();
+  if(!n){toast("Nichts ausgewählt – Vertrag unverändert.");return;}
+  try{
+    await saveContractData(cols,a.cid);
+    await loadFromDB();
+    detailId=a.cid;activeView="contract-detail";renderApp();
+    toast(n+" Angabe"+(n===1?"":"n")+" aktualisiert ✅");
+  }catch(e){toast("Aktualisieren fehlgeschlagen: "+errMsg(e),true);}
+}
 /* Review-Aktionen: Kündigung übernehmen / Preis aktualisieren / Daten ergänzen */
 async function reviewCancelContract(id){
   var d=reviewDoc;reviewDoc=null;
@@ -1364,6 +1441,7 @@ function viewContractDetail(){
     '<div class="btnrow">'+
       (f.lastDay?'<button class="primary" data-action="ics" data-id="'+c.id+'">📅 Frist in Kalender</button>':"")+
       '<button class="ghost" data-action="edit-contract" data-id="'+c.id+'">✏️ Bearbeiten</button>'+
+      (docs.some(function(d){return !!d.extracted;})?'<button class="ghost" data-action="adjust-contract" data-id="'+c.id+'">🔄 Aus Dokumenten aktualisieren</button>':"")+
       statusBtn+
       '<button class="danger" data-action="del-contract" data-id="'+c.id+'">🗑️ Löschen</button>'+
     '</div></section>'+
@@ -2373,7 +2451,7 @@ function gdriveCard(){
 /* ---------- Modal-Dialoge (ersetzen die Browser-Prompts) ---------- */
 var modalCb=null;
 function openModal(html){var w=$("#modal");if(!w)return;$("#modalBox").innerHTML=html;w.hidden=false;document.body.classList.add("modal-open");}
-function closeModal(){var w=$("#modal");if(!w)return;w.hidden=true;$("#modalBox").innerHTML="";modalCb=null;document.body.classList.remove("modal-open");}
+function closeModal(){var w=$("#modal");if(!w)return;w.hidden=true;$("#modalBox").innerHTML="";modalCb=null;adjustSugs=null;document.body.classList.remove("modal-open");}
 function askModal(title,label,value,type,btnLabel,cb){
   modalCb=cb;
   openModal('<h2 class="sect">'+title+'</h2><label class="f">'+label+'</label><input type="'+(type||"text")+'" id="mq_input" value="'+escapeHtml(value==null?"":value)+'">'+
@@ -2547,6 +2625,8 @@ function onAppClick(e){
     closeModal();
     (async function(){try{var p=await createPerson(ppName);if(p)await setContractPerson(ppCid2,p.id);}catch(e){toast("Fehlgeschlagen: "+errMsg(e),true);}})();
   }
+  else if(act==="adjust-contract")openAdjustModal(id,"");
+  else if(act==="adjust-apply")applyAdjust();
   else if(act==="mq-ok"){var mqv=$("#mq_input")?$("#mq_input").value:"";var mqcb=modalCb;modalCb=null;closeModal();if(mqcb)mqcb(mqv);}
   else if(act==="modal-close")closeModal();
   else if(act==="to-med"){closeModal();toMedical(id);}
