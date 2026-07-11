@@ -300,6 +300,16 @@ body.modal-open{overflow:hidden}
 .adjrow .adjtxt{font-size:.92rem;min-width:0}
 .adjrow .adjarr{color:var(--muted)}
 .adjrow .adjsrc{display:block;font-size:.78rem;color:var(--muted);margin-top:2px}
+.gdpath{display:flex;gap:8px;margin:0 0 8px}
+.gdpath input{flex:1;min-width:0}
+.gdcrumbs{display:flex;flex-wrap:wrap;gap:4px;align-items:center;font-size:.85rem;margin:0 0 10px;color:var(--muted)}
+.gdcrumbs button{background:none;border:0;color:var(--accent);cursor:pointer;font:inherit;padding:2px;font-weight:600}
+.gdrows{margin:0 0 10px;max-height:420px;overflow-y:auto}
+.gdrow{display:flex;align-items:center;gap:10px;width:100%;padding:10px 12px;border:1px solid var(--border);border-radius:11px;background:var(--panel);color:var(--fg);font:inherit;text-align:left;margin:0 0 7px;font-size:.92rem;cursor:pointer}
+.gdrow:hover{background:var(--panel2)}
+.gdrow input{accent-color:var(--accent);flex:none}
+.gdrow .gdname{min-width:0;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.gdrow .gdimp{font-size:.75rem;color:var(--muted);flex:none}
 @media(max-width:620px){
  .modalwrap{align-items:flex-end;padding:0}
  .modalbox{border-radius:20px 20px 0 0;max-width:none;max-height:88vh;border-left:none;border-right:none;border-bottom:none}
@@ -1176,7 +1186,7 @@ async function reviewCreatePerson(name){
 /* ---------- Views ---------- */
 var contractsCostSort=false,tipsExpanded=false;
 var uploadTarget=null; /* Vertrag, dem neue Uploads fest zugeordnet werden ("Dokument zu diesem Vertrag") */
-function go(view){activeView=view;if(view!=="contract-detail")detailId=null;if(view!=="contracts")contractsCostSort=false;if(view!=="add")uploadTarget=null;tipsExpanded=false;renderApp();window.scrollTo({top:0,behavior:"smooth"});}
+function go(view){activeView=view;if(view!=="contract-detail")detailId=null;if(view!=="contracts")contractsCostSort=false;if(view!=="add"){uploadTarget=null;gdriveBrowse=null;}tipsExpanded=false;renderApp();window.scrollTo({top:0,behavior:"smooth"});}
 function navItem(v,label,icon){return '<button class="tab'+(v===activeView?" active":"")+'" data-nav="'+v+'"><span class="tcon">'+icon+'</span>'+label+'</button>';}
 function renderTabs(){
   var items=navItem("dashboard","Übersicht","🏠")+navItem("contracts","Verträge","📑")+navItem("gesundheit","Gesundheit","🩺")+navItem("docs","Dokumente","📁")+navItem("add","Hinzufügen","➕");
@@ -1946,12 +1956,14 @@ function viewAdd(){
   '<div class="upzone">'+
    '<button class="upbtn" data-action="pick-cam"><span class="uic">📷</span>Brief fotografieren<span class="usub">Kamera öffnet sich direkt</span></button>'+
    '<button class="upbtn" data-action="pick-file"><span class="uic">📄</span>Dateien auswählen<span class="usub">PDF, Fotos oder E-Mails (.eml) · mehrere möglich · auf Android auch aus Google Drive</span></button>'+
+   '<button class="upbtn" data-action="gdrive-browse"><span class="uic">🗂️</span>Aus Google Drive<span class="usub">'+(isNative()?"Am Handy: „Dateien auswählen“ öffnet Drive direkt":(gdriveClientId()?"Ordner durchsuchen und Dateien auswählen":"Einmalig in den Einstellungen verbinden"))+'</span></button>'+
   '</div>'+
   '<input type="file" id="fileCam" accept="image/*" capture="environment" hidden>'+
   '<input type="file" id="filePick" accept="application/pdf,image/*,message/rfc822,.eml" multiple hidden>'+
   '<div id="aiWork" class="aiwork" hidden><span class="spin"></span><span class="aimsg">…</span><button class="ghost" id="aiCancel" data-action="cancel-import" style="margin-left:auto;flex:none">Abbrechen</button></div>'+
   '<p class="muted" style="font-size:.8rem;margin-top:14px">🔒 Deine Dokumente liegen verschlüsselt in deinem privaten Speicher und sind nur für deinen Haushalt sichtbar. Die KI-Analyse kostet weniger als 1 Cent pro Dokument.</p>'+
-  '</section>';
+  '</section>'+
+  gdriveBrowseCard();
 }
 
 /* ---- Einstellungen ---- */
@@ -2424,13 +2436,133 @@ async function gdriveImport(){
   addGdriveImported(okIds);
   processFiles(toImport);
 }
+/* --- Drive als Quelle im Hinzufügen-Bereich: Ordner-Browser mit Dateiauswahl --- */
+var gdriveBrowse=null; /* {stack:[{id,name}],folders:[],files:[],busy} */
+async function gdriveFetch(url){
+  var token=gdriveToken||await gdriveGetToken();
+  var r=await fetch(url,{headers:{Authorization:"Bearer "+token}});
+  if(r.status===401){gdriveToken=null;token=await gdriveGetToken();r=await fetch(url,{headers:{Authorization:"Bearer "+token}});}
+  if(!r.ok)throw new Error("Drive-Abfrage fehlgeschlagen ("+r.status+")");
+  return r;
+}
+async function gdriveListFolder(fid){
+  var q="'"+fid+"' in parents and trashed=false and (mimeType='application/vnd.google-apps.folder' or mimeType='application/pdf' or mimeType contains 'image/')";
+  var url="https://www.googleapis.com/drive/v3/files?q="+encodeURIComponent(q)+"&fields=files(id,name,mimeType)&orderBy=folder,name&pageSize=200";
+  var list=await (await gdriveFetch(url)).json();
+  var fs=list.files||[];
+  return {
+    folders:fs.filter(function(f){return f.mimeType==="application/vnd.google-apps.folder";}),
+    files:fs.filter(function(f){return f.mimeType!=="application/vnd.google-apps.folder";})
+  };
+}
+async function gdriveFolderName(fid){
+  if(fid==="root")return "Meine Ablage";
+  try{var m=await (await gdriveFetch("https://www.googleapis.com/drive/v3/files/"+fid+"?fields=name")).json();return m.name||"Ordner";}
+  catch(e){return "Ordner";}
+}
+/* Eingabe: Drive-Link, Ordner-ID oder Pfad ab „Meine Ablage" (z. B. Scans/2026) */
+async function gdriveResolvePath(input){
+  input=(input||"").trim();
+  if(!input)throw new Error("Bitte Link, ID oder Pfad eingeben.");
+  if(/drive\.google\.com/.test(input)||/^[-\w]{25,}$/.test(input)){
+    var fid=extractFolderId(input);
+    return {id:fid,name:await gdriveFolderName(fid)};
+  }
+  var segs=input.split("/").map(function(s){return s.trim();}).filter(Boolean);
+  var cur="root",name="Meine Ablage";
+  for(var i=0;i<segs.length;i++){
+    var q="'"+cur+"' in parents and trashed=false and mimeType='application/vnd.google-apps.folder' and name='"+segs[i].replace(/\\/g,"\\\\").replace(/'/g,"\\'")+"'";
+    var url="https://www.googleapis.com/drive/v3/files?q="+encodeURIComponent(q)+"&fields=files(id,name)&pageSize=2";
+    var list=await (await gdriveFetch(url)).json();
+    var hit=(list.files||[])[0];
+    if(!hit)throw new Error("Ordner „"+segs[i]+"“ wurde in Drive nicht gefunden.");
+    cur=hit.id;name=hit.name;
+  }
+  return {id:cur,name:name};
+}
+async function openGdriveBrowse(){
+  if(isNative()){toast("Die Google-Anmeldung funktioniert nur im Browser (Laptop). Tipp: „Dateien auswählen“ erreicht Google Drive auf dem Handy direkt.",true);return;}
+  if(!gdriveClientId()){toast("Bitte zuerst in den Einstellungen unter „Google Drive verbinden“ die Client-ID hinterlegen (einmalig).",true);go("settings");return;}
+  gdriveBrowse={stack:[],folders:[],files:[],busy:true};renderApp();
+  try{
+    var start=gdriveFolderId()||"root";
+    var name=await gdriveFolderName(start);
+    await gdriveNav(start,name,true);
+  }catch(e){gdriveBrowse=null;renderApp();toast("Google Drive: "+errMsg(e),true);}
+}
+async function gdriveNav(fid,name,reset){
+  if(!gdriveBrowse)gdriveBrowse={stack:[],folders:[],files:[]};
+  gdriveBrowse.busy=true;renderApp();
+  try{
+    var res=await gdriveListFolder(fid);
+    if(reset)gdriveBrowse.stack=[{id:fid,name:name}];
+    else gdriveBrowse.stack.push({id:fid,name:name});
+    gdriveBrowse.folders=res.folders;gdriveBrowse.files=res.files;gdriveBrowse.busy=false;
+    renderApp();
+  }catch(e){gdriveBrowse.busy=false;renderApp();toast("Drive-Ordner konnte nicht gelesen werden: "+errMsg(e),true);}
+}
+async function gdriveCrumb(i){
+  if(!gdriveBrowse)return;
+  var s=gdriveBrowse.stack[i];if(!s)return;
+  gdriveBrowse.stack=gdriveBrowse.stack.slice(0,i);
+  await gdriveNav(s.id,s.name,false);
+}
+async function gdriveImportSelected(){
+  var b=gdriveBrowse;if(!b)return;
+  var boxes=Array.prototype.filter.call(document.querySelectorAll(".gdcb"),function(x){return x.checked;});
+  if(!boxes.length){toast("Bitte mindestens eine Datei anhaken.",true);return;}
+  var picked=boxes.map(function(x){return b.files.find(function(f){return f.id===x.dataset.id;});}).filter(Boolean);
+  toast(picked.length+" Datei(en) werden aus Drive geholt …");
+  var toImport=[],okIds=[];
+  for(var i=0;i<picked.length;i++){
+    try{
+      var dr=await gdriveFetch("https://www.googleapis.com/drive/v3/files/"+picked[i].id+"?alt=media");
+      var blob=await dr.blob();
+      toImport.push(new File([blob],picked[i].name||("drive-"+picked[i].id),{type:picked[i].mimeType||blob.type}));
+      okIds.push(picked[i].id);
+    }catch(e){}
+  }
+  if(!toImport.length){toast("Die Dateien konnten nicht aus Drive geladen werden.",true);return;}
+  addGdriveImported(okIds);
+  gdriveBrowse=null;
+  processFiles(toImport);
+}
+function gdriveBrowseCard(){
+  if(!gdriveBrowse)return "";
+  var b=gdriveBrowse;
+  var head='<section class="card"><h2 class="sect">🗂️ Google Drive</h2>';
+  if(b.busy)return head+'<div class="aiwork" style="justify-content:center"><span class="spin"></span><span class="aimsg">Drive wird gelesen …</span></div></section>';
+  var crumbs=b.stack.map(function(s,i){
+    var last=(i===b.stack.length-1);
+    return last?('<b style="color:var(--fg)">'+escapeHtml(s.name)+'</b>'):('<button data-action="gd-crumb" data-i="'+i+'">'+escapeHtml(s.name)+'</button><span>›</span>');
+  }).join("");
+  var imported=gdriveImportedSet();
+  var folders=b.folders.map(function(f){
+    return '<button class="gdrow folder" data-action="gd-folder" data-id="'+f.id+'" data-name="'+escapeHtml(f.name)+'">📁<span class="gdname">'+escapeHtml(f.name)+'</span><span class="gdimp">öffnen ›</span></button>';
+  }).join("");
+  var files=b.files.map(function(f){
+    var done=imported.indexOf(f.id)>=0;
+    var ic=f.mimeType==="application/pdf"?"📄":"🖼️";
+    return '<label class="gdrow"><input type="checkbox" class="gdcb" data-id="'+f.id+'"'+(done?"":" checked")+'>'+ic+'<span class="gdname">'+escapeHtml(f.name)+'</span>'+(done?'<span class="gdimp">✓ schon eingelesen</span>':"")+'</label>';
+  }).join("");
+  var nChecked=b.files.filter(function(f){return imported.indexOf(f.id)<0;}).length;
+  return head+
+    '<div class="gdpath"><input type="text" id="gd_path" placeholder="Ordner-Link, ID oder Pfad – z. B. Scans/2026"><button class="ghost" data-action="gd-open-path" style="flex:none">Öffnen</button></div>'+
+    '<div class="gdcrumbs">'+crumbs+'</div>'+
+    '<div class="gdrows">'+folders+(files||'<p class="muted" style="font-size:.88rem;margin:4px 0">Keine PDFs oder Bilder in diesem Ordner.</p>')+'</div>'+
+    (b.files.length?'<p class="muted" style="font-size:.8rem;margin:0 0 10px">Bereits eingelesene Dateien sind abgehakt markiert und standardmäßig abgewählt.</p>':"")+
+    '<div class="btnrow"><button class="primary" data-action="gd-import-sel" id="gdCount">Ausgewählte einlesen'+(nChecked?' ('+nChecked+')':'')+'</button>'+
+    '<button class="ghost" data-action="gd-set-default">📌 Als Standardordner merken</button>'+
+    '<button class="ghost" data-action="gd-close">Schließen</button></div>'+
+  '</section>';
+}
 function gdriveCard(){
   var cid=gdriveClientId(),folder=gdriveFolderId(),imported=gdriveImportedSet().length;
   var configured=(cid&&folder);
   return '<section class="card"><h2 class="sect">🗂️ Google Drive verbinden</h2>'+
     (configured
-      ?('<p class="muted" style="font-size:.9rem">Dein Drive-Ordner ist verbunden. Der Butler holt neue PDFs und Bilder daraus und sortiert sie automatisch ein.</p>'+
-        '<div class="btnrow"><button class="primary" data-action="gd-import">🔄 Dokumente importieren</button></div>')
+      ?('<p class="muted" style="font-size:.9rem">Dein Drive-Ordner ist verbunden. Unter <b>➕ Hinzufügen → Aus Google Drive</b> kannst du Ordner durchsuchen und gezielt Dateien auswählen – oder hier alle neuen auf einmal holen.</p>'+
+        '<div class="btnrow"><button class="primary" data-action="gd-import">🔄 Alle neuen Dokumente importieren</button></div>')
       :('<p class="muted" style="font-size:.9rem">Verbinde einen Google-Drive-Ordner (z. B. mit deinen Scans). Der Butler holt die PDFs und Bilder daraus und sortiert sie automatisch ein. Am besten am Laptop im Browser.</p>'))+
     '<details style="margin-top:10px"'+(configured?"":" open")+'><summary style="cursor:pointer;color:var(--accent);font-weight:600;font-size:.9rem">'+(configured?"Verbindung ändern":"Verbindung einrichten")+'</summary>'+
     '<label class="f">Google Client-ID</label><input type="text" id="gd_client" value="'+escapeHtml(cid)+'" placeholder="…apps.googleusercontent.com">'+
@@ -2599,6 +2731,10 @@ function gsOpen(type,id){
 
 /* ---------- Events ---------- */
 function onAppClick(e){
+  if(e.target&&e.target.classList&&e.target.classList.contains("gdcb")){
+    var gdc=$("#gdCount");if(gdc){var gn=document.querySelectorAll(".gdcb:checked").length;gdc.textContent="Ausgewählte einlesen"+(gn?" ("+gn+")":"");}
+    return;
+  }
   var nav=e.target.closest("[data-nav]");
   if(nav){if(nav.dataset.nav==="add"){reviewDoc=null;importResults=[];uploadTarget=null;}go(nav.dataset.nav);return;}
   var b=e.target.closest("[data-action]");if(!b)return;
@@ -2673,6 +2809,25 @@ function onAppClick(e){
   else if(act==="pin-remove"){if(confirm("PIN wirklich entfernen? Die App ist dann ohne Sperre zugänglich.")){removePin();renderApp();toast("PIN entfernt");}}
   else if(act==="gd-save")saveGdriveConfig();
   else if(act==="gd-import")gdriveImport();
+  else if(act==="gdrive-browse")openGdriveBrowse();
+  else if(act==="gd-folder")gdriveNav(id,b.dataset.name||"Ordner",false);
+  else if(act==="gd-crumb")gdriveCrumb(parseInt(b.dataset.i,10));
+  else if(act==="gd-open-path"){
+    (async function(){
+      var inp=$("#gd_path"),v=inp?inp.value:"";
+      try{
+        if(gdriveBrowse){gdriveBrowse.busy=true;renderApp();}
+        var t=await gdriveResolvePath(v);
+        await gdriveNav(t.id,t.name,true);
+      }catch(e){if(gdriveBrowse){gdriveBrowse.busy=false;renderApp();}toast(errMsg(e),true);}
+    })();
+  }
+  else if(act==="gd-set-default"){
+    var gdTop=gdriveBrowse&&gdriveBrowse.stack.length?gdriveBrowse.stack[gdriveBrowse.stack.length-1]:null;
+    if(gdTop){try{localStorage.setItem("db_gdrive_folder",gdTop.id);}catch(e){}toast("„"+gdTop.name+"“ ist jetzt dein Standard-Drive-Ordner ✅");}
+  }
+  else if(act==="gd-import-sel")gdriveImportSelected();
+  else if(act==="gd-close"){gdriveBrowse=null;renderApp();}
   else if(act==="set-model")setModel(b.dataset.val);
   else if(act==="acc-change-pass")changeAccountPassword();
   else if(act==="logout")doLogout();
