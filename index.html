@@ -719,7 +719,9 @@ async function setContractPerson(contractId,personId){
     await loadFromDB();renderApp();toast(personId?"Person zugeordnet ✅":"Personen-Zuordnung entfernt ✅");}
   catch(e){toast("Zuordnen fehlgeschlagen: "+errMsg(e),true);}
 }
+var INT_COLS={mindestlaufzeit_monate:1,verlaengerung_monate:1}; /* Ganzzahl-Spalten – zentral runden, egal aus welchem Pfad */
 async function saveContractData(cols,id){
+  if(cols)Object.keys(INT_COLS).forEach(function(k){if(cols[k]!=null&&cols[k]!==""&&!isNaN(Number(cols[k])))cols[k]=Math.round(Number(cols[k]));});
   if(id){var r=await sb.from("contracts").update(cols).eq("id",id);if(r.error)throw r.error;return id;}
   cols.household_id=activeHousehold;
   var r2=await sb.from("contracts").insert(cols).select("id").single();if(r2.error)throw r2.error;return r2.data.id;
