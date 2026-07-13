@@ -868,6 +868,7 @@ async function processFiles(files){
   var abgebrochen=importCancel;
   importBusy=false;importCancel=false;hideAiWork();
   try{await loadFromDB();}catch(e){}
+  try{await batchReconcile();}catch(e){}
   activeView="add";renderApp();
   if(abgebrochen)toast("Abgebrochen – "+importResults.length+" von "+n+" schon eingelesen.");
   else if(importResults.length)toast(importResults.length+(importResults.length===1?" Dokument":" Dokumente")+" eingelesen ✅");
@@ -926,9 +927,18 @@ function bytesToBase64(bytes){
   for(var i=0;i<bytes.length;i+=chunk){bin+=String.fromCharCode.apply(null,bytes.subarray(i,i+chunk));}
   return btoa(bin);
 }
+/* Speicherpfad: Supabase-Storage-Keys vertragen nur ASCII – Umlaute/ß transliterieren,
+   sonst schlägt der Upload mit "Invalid key" fehl (z. B. "Begrüßungsschreiben.pdf") */
+function storageSafeName(name){
+  var s=String(name||"dokument");
+  try{s=s.normalize("NFC");}catch(e){}
+  s=s.replace(/[äöüÄÖÜß]/g,function(c){return ({"ä":"ae","ö":"oe","ü":"ue","Ä":"Ae","Ö":"Oe","Ü":"Ue","ß":"ss"})[c];});
+  try{s=s.normalize("NFKD").replace(/[\u0300-\u036f]/g,"");}catch(e){}
+  return s.replace(/[^A-Za-z0-9._\-]+/g,"_").slice(-80);
+}
 /* Kern: ablegen, KI, speichern, dann automatisch einsortieren. Gibt ein Ergebnis zurück. */
 async function ingest(opts){
-  var safe=(opts.fname||"dokument").replace(/[^\wäöüÄÖÜß.\-]+/g,"_").slice(-80);
+  var safe=storageSafeName(opts.fname);
   var path=activeHousehold+"/"+Date.now()+"_"+Math.random().toString(36).slice(2,7)+"_"+safe;
   /* Datei EINMAL in einen festen Puffer lesen – stabiler in der Android-WebView als das Streamen des File-Objekts */
   var bytes;
@@ -968,10 +978,10 @@ async function ingest(opts){
       /* Guthaben leer: Dokument bleibt gespeichert, wird als „wartet auf KI" markiert */
       kiGuthabenHit=true;
       try{await sb.from("documents").update({ki_pending:true}).eq("id",docRow.id);}catch(_e){}
-      var resG={name:opts.fname||"Dokument",icon:"⏳",text:"gespeichert – KI-Guthaben ist aufgebraucht, die Analyse wird später nachgeholt",view:"docs",id:docRow.id};
+      var resG={name:opts.fname||"Dokument",icon:"⏳",text:"gespeichert – KI-Guthaben ist aufgebraucht, die Analyse wird später nachgeholt",view:"docs",id:docRow.id,docId:docRow.id};
       importResults.push(resG);return resG;
     }
-    var res0={name:opts.fname||"Dokument",icon:"⚠️",text:"abgelegt, aber KI-Analyse fehlgeschlagen",view:"docs",id:docRow.id};
+    var res0={name:opts.fname||"Dokument",icon:"⚠️",text:"abgelegt, aber KI-Analyse fehlgeschlagen",view:"docs",id:docRow.id,docId:docRow.id};
     importResults.push(res0);return res0;
   }
   try{
@@ -1156,7 +1166,7 @@ async function autoFileDoc(docId,ext){
         if(nAdd)await saveContractData({details:merged},match.id);
       }
     }catch(e){}
-    return {name:name,icon:katInfo(match.kategorie).icon,text:"zu „"+(match.anbieter||"Vertrag")+"“ zugeordnet"+extraTxt,view:"contract-detail",id:match.id,notes:notes};
+    return {name:name,icon:katInfo(match.kategorie).icon,text:"zu „"+(match.anbieter||"Vertrag")+"“ zugeordnet"+extraTxt,view:"contract-detail",id:match.id,notes:notes,docId:d.id,cid:match.id};
   }
   if(ext&&(ext.docType==="vertrag"||ext.docType==="police")&&ext.anbieter){
     try{
@@ -1173,11 +1183,11 @@ async function autoFileDoc(docId,ext){
       }
       var newId=await saveContractData(cols,null);
       await linkDocSilent(d.id,newId);
-      return {name:name,icon:katInfo(cols.kategorie).icon,text:"neuer Vertrag „"+ext.anbieter+"“ angelegt"+personTxt,view:"contract-detail",id:newId};
+      return {name:name,icon:katInfo(cols.kategorie).icon,text:"neuer Vertrag „"+ext.anbieter+"“ angelegt"+personTxt,view:"contract-detail",id:newId,docId:d.id,cid:newId};
     }catch(e){}
   }
   var kat=(ext&&ext.kategorie)?katInfo(ext.kategorie):null;
-  return {name:name,icon:(kat?kat.icon:dtInfo(d.doc_type).icon),text:"im Archiv abgelegt"+(kat?" · "+kat.label:""),view:"docs"};
+  return {name:name,icon:(kat?kat.icon:dtInfo(d.doc_type).icon),text:"im Archiv abgelegt"+(kat?" · "+kat.label:""),view:"docs",docId:d.id};
 }
 function importSummaryCard(){
   var items=importResults.map(function(r,i){
@@ -1339,6 +1349,57 @@ function missingFills(c,ext){
 }
 async function linkDocSilent(docId,contractId){
   try{await sb.from("documents").update({contract_id:contractId}).eq("id",docId);}catch(e){}
+}
+/* Nach einem Mehrfach-Upload: unverknüpft gebliebene Dokumente gegen die Verträge
+   aus DIESEM Upload prüfen. Bewusst lockerer als findMatch: die Kategorie darf
+   abweichen (ein SEPA-Mandat ist "sonstiges", gehört aber trotzdem zum Gasvertrag),
+   und Kunden-/Vertragsnummern zählen auch, wenn der Vertrag noch gar keine hat. */
+async function batchReconcile(){
+  var cids=[];
+  importResults.forEach(function(r){if(r.cid&&cids.indexOf(r.cid)<0)cids.push(r.cid);});
+  if(!cids.length)return;
+  var changed=false;
+  for(var i=0;i<importResults.length;i++){
+    var r=importResults[i];
+    if(!r.docId)continue;
+    var d=DOCS.find(function(x){return x.id===r.docId;});
+    if(!d||d.contract_id||isMed(d)||!d.extracted)continue;
+    var ext=d.extracted;
+    var kd=(ext.kundennummer||"").replace(/\s+/g,"").toLowerCase();
+    var vn=(ext.vertragsnummer||"").replace(/\s+/g,"").toLowerCase();
+    var ab=(ext.anbieter||"").trim().toLowerCase();
+    var sum=((d.zusammenfassung||"")+" "+((ext.wichtig||[]).join(" "))).toLowerCase();
+    var hit=null;
+    for(var j=0;j<cids.length&&!hit;j++){
+      var c=contractById(cids[j]);if(!c)continue;
+      var ckd=(c.kundennummer||"").replace(/\s+/g,"").toLowerCase();
+      var cvn=(c.vertragsnummer||"").replace(/\s+/g,"").toLowerCase();
+      var cab=(c.anbieter||"").trim().toLowerCase();
+      if(kd&&(kd===ckd||kd===cvn))hit=c;
+      else if(vn&&(vn===cvn||vn===ckd))hit=c;
+      else if(ab.length>=3&&cab.length>=3&&(ab.indexOf(cab)>=0||cab.indexOf(ab)>=0))hit=c;
+      else if(cids.length===1&&cab.length>=4&&sum.indexOf(cab)>=0)hit=c;
+    }
+    if(!hit)continue;
+    await linkDocSilent(d.id,hit.id);
+    changed=true;
+    /* Person und fehlende Stammdaten übernehmen – wie beim direkten Treffer */
+    if(!hit.person_id&&d.person_id){
+      try{await saveContractData({person_id:d.person_id},hit.id);hit.person_id=d.person_id;}catch(e){}
+    }
+    try{
+      var fillCols={},nf=0;
+      FILL_MAP.forEach(function(f){
+        var ev=ext[f.ext];
+        if(ev!=null&&ev!==""&&(hit[f.col]==null||hit[f.col]===""))
+          {fillCols[f.col]=(ADJ_NUM&&ADJ_NUM[f.col])?Number(ev):ev;nf++;}
+      });
+      if(nf){await saveContractData(fillCols,hit.id);Object.keys(fillCols).forEach(function(k){hit[k]=fillCols[k];});}
+    }catch(e){}
+    r.text="gehört zum selben Vertrag → zu „"+(hit.anbieter||"Vertrag")+"“ zugeordnet";
+    r.view="contract-detail";r.id=hit.id;r.icon=katInfo(hit.kategorie).icon;
+  }
+  if(changed){try{await loadFromDB();}catch(e){}}
 }
 /* Vertrag anhand der zugeordneten Dokumente neu berechnen: neuestes Dokument je Angabe gewinnt */
 var adjustSugs=null;
