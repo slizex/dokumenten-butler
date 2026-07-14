@@ -2254,6 +2254,7 @@ function medRechercheCard(d){
     '</section>';
   }
   var le=(Array.isArray(rc.leistungen)&&rc.leistungen.length)?('<div class="acclabel accsep">🧾 Was wurde abgerechnet?</div>'+rc.leistungen.map(function(l){return '<div class="errrow"><div style="font-size:.87rem;font-weight:600">'+escapeHtml(String((l&&l.position)||"?"))+'</div><div style="font-size:.88rem;color:var(--muted)">'+escapeHtml(String((l&&l.erklaerung)||""))+'</div></div>';}).join("")):"";
+  var mat=(Array.isArray(rc.materialien)&&rc.materialien.length)?('<div class="acclabel accsep">🧰 Verwendete Materialien</div>'+rc.materialien.map(function(mm){return '<div class="errrow"><div style="font-size:.87rem;font-weight:600">'+escapeHtml(String((mm&&mm.material)||"?"))+'</div><div style="font-size:.88rem;color:var(--muted)">'+escapeHtml(String((mm&&mm.erklaerung)||""))+'</div></div>';}).join("")):"";
   var bg=(Array.isArray(rc.begriffe)&&rc.begriffe.length)?('<div class="acclabel accsep">📖 Begriffe einfach erklärt</div>'+rc.begriffe.map(function(b){return '<div class="errrow"><div style="font-size:.87rem;font-weight:600">'+escapeHtml(String((b&&b.begriff)||"?"))+'</div><div style="font-size:.88rem;color:var(--muted)">'+escapeHtml(String((b&&b.erklaerung)||""))+'</div></div>';}).join("")):"";
   var auf=(Array.isArray(rc.auffaellig)&&rc.auffaellig.length)?('<div class="ainote" style="background:color-mix(in srgb,#d97706 9%,transparent);border-color:#d97706">⚠️ <b>Auffälligkeiten:</b><ul class="wichtig" style="margin:4px 0 0">'+rc.auffaellig.map(function(a){return '<li>'+escapeHtml(String(a))+'</li>';}).join("")+'</ul></div>'):"";
   var erst=rc.erstattung?'<div class="ainote">💶 '+escapeHtml(String(rc.erstattung))+'</div>':"";
@@ -2261,7 +2262,7 @@ function medRechercheCard(d){
   return '<section class="card"><h2 class="sect">🔍 Verständlich erklärt</h2>'+
     '<p class="muted" style="font-size:.8rem;margin:0 0 8px">Stand '+fmtDate(String(d.med_recherche_am||"").slice(0,10))+' · KI-Recherche mit Internetsuche – ersetzt keine ärztliche oder rechtliche Beratung.</p>'+
     (rc.erklaerung?'<p style="font-size:.95rem">'+escapeHtml(String(rc.erklaerung))+'</p>':"")+
-    le+bg+auf+erst+
+    le+mat+bg+auf+erst+
     (rc.hinweise?'<div class="ainote">💡 '+escapeHtml(String(rc.hinweise))+'</div>':"")+
     qs+
     '<div class="btnrow"><button class="ghost" data-action="med-research" data-id="'+d.id+'">🔄 Neu erklären lassen</button></div>'+
