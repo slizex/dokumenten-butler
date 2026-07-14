@@ -2160,9 +2160,11 @@ function viewMedForm(){
   '<label class="f">Behandlung / Anlass</label><textarea id="mf_e_beh">'+escapeHtml(beh)+'</textarea>'+
   '<label class="f">Notiz</label><textarea id="mf_e_note">'+escapeHtml(d.note||"")+'</textarea>'+
   '<div class="btnrow"><button class="primary" data-action="med-save">💾 Speichern</button>'+
+   '<button class="ghost" data-action="doc-view" data-id="'+d.id+'">👁️ Ansehen</button>'+
    '<button class="ghost" data-action="med-tovertrag" data-id="'+d.id+'">↩️ Kein Arzt-Dokument (zurück zu Dokumente)</button>'+
    '<button class="ghost" data-nav="gesundheit">Abbrechen</button></div>'+
-  '</section>';
+  '</section>'+
+  medRechercheCard(d);
 }
 async function onSaveMed(){
   if(saveBusy)return;
@@ -2206,6 +2208,64 @@ async function fromMedical(docId){
   try{var r=await sb.from("documents").update({bereich:"vertrag"}).eq("id",docId);if(r.error)throw r.error;
     medEditId=null;await loadFromDB();activeView="docs";renderApp();toast("Zurück zu den Dokumenten verschoben ✅");}
   catch(e){toast("Verschieben fehlgeschlagen: "+errMsg(e),true);}
+}
+/* ---- Gesundheits-Recherche: Rechnung/Befund für Laien erklären lassen ----
+   Lädt die Datei, schickt sie an butler-med-explain (liest + recherchiert per
+   Websuche GOÄ-/GOZ-Ziffern, Diagnosen, Fachbegriffe) und speichert die
+   Erklärung am Dokument (med_recherche). */
+var medResearchBusy=false;
+async function medResearch(docId){
+  var d=DOCS.find(function(x){return x.id===docId;});if(!d)return;
+  if(medResearchBusy)return;medResearchBusy=true;
+  openModal('<h2 class="sect">🔍 Verständlich erklären</h2><div class="aiwork" style="justify-content:center"><span class="spin"></span><span class="aimsg">Der Butler liest das Dokument und recherchiert Abrechnungsziffern und Fachbegriffe im Internet … das kann bis zu einer Minute dauern.</span></div>');
+  try{
+    var dl=await sb.storage.from(BUCKET).download(d.storage_path);
+    if(dl.error)throw new Error("Datei konnte nicht geladen werden.");
+    var bytes=new Uint8Array(await dl.data.arrayBuffer());
+    var r=await sb.functions.invoke("butler-med-explain",{body:{fileBase64:bytesToBase64(bytes),mimeType:d.mime_type||"application/pdf",model:modelPref(),kontext:{arzt:d.arzt||null,fachrichtung:d.fachrichtung||null,medTyp:d.med_typ||null,betrag:(d.betrag!=null?d.betrag:null)}}});
+    if(r.error){
+      var mcode=null,mmsg=null;
+      try{if(r.error.context&&typeof r.error.context.json==="function"){var mjb=await r.error.context.json();if(mjb){mcode=mjb.code;mmsg=mjb.error;}}}catch(e){}
+      if(mcode==="ki_guthaben"){closeModal();toast("Das KI-Guthaben ist aufgebraucht – bitte später erneut versuchen.",true);return;}
+      throw new Error(mmsg||errMsg(r.error));
+    }
+    var body=r.data||{};
+    if(body.error){if(body.code==="ki_guthaben"){closeModal();toast("Das KI-Guthaben ist aufgebraucht – bitte später erneut versuchen.",true);return;}throw new Error(body.error);}
+    if(!body.recherche)throw new Error("Keine Erklärung erhalten.");
+    var ur=await sb.from("documents").update({med_recherche:body.recherche,med_recherche_am:new Date().toISOString()}).eq("id",docId);
+    if(ur.error)throw ur.error;
+    try{await sb.from("ai_usage").insert({household_id:activeHousehold,user_email:(currentUser&&currentUser.email)||null,model:body.modell||null,input_tokens:(body.usage&&typeof body.usage.input==="number")?body.usage.input:null,output_tokens:(body.usage&&typeof body.usage.output==="number")?body.usage.output:null,filename:"🩺 Erklärung: "+(d.filename||"?")+((body.usage&&body.usage.searches)?" · "+body.usage.searches+" Suchen":"")});}catch(e){}
+    await loadFromDB();
+    closeModal();
+    medEditId=docId;activeView="med-form";renderApp();window.scrollTo({top:0,behavior:"smooth"});
+    toast("Erklärung erstellt ✅");
+  }catch(e){closeModal();toast("Erklären fehlgeschlagen: "+errMsg(e),true);}
+  finally{medResearchBusy=false;}
+}
+function medRechercheCard(d){
+  var rc=d.med_recherche;
+  var isRe=(d.med_typ==="rechnung");
+  if(!rc){
+    return '<section class="card"><h2 class="sect">🔍 Verständlich erklären</h2>'+
+      '<p class="muted" style="font-size:.9rem;margin:0 0 10px">'+(isRe
+        ?'Der Butler liest die Rechnung, recherchiert im Internet, was hinter den Abrechnungsziffern (GOÄ/GOZ) steckt, und erklärt dir in Alltagssprache, wofür du bezahlst – inklusive Hinweis auf Auffälligkeiten.'
+        :'Der Butler liest das Dokument, recherchiert Fachbegriffe, Diagnosen und Werte im Internet und erklärt dir in Alltagssprache, was sie bedeuten.')+'</p>'+
+      '<div class="btnrow"><button class="primary" data-action="med-research" data-id="'+d.id+'">🔍 '+(isRe?'Rechnung erklären lassen':'Dokument erklären lassen')+'</button></div>'+
+    '</section>';
+  }
+  var le=(Array.isArray(rc.leistungen)&&rc.leistungen.length)?('<div class="acclabel accsep">🧾 Was wurde abgerechnet?</div>'+rc.leistungen.map(function(l){return '<div class="errrow"><div style="font-size:.87rem;font-weight:600">'+escapeHtml(String((l&&l.position)||"?"))+'</div><div style="font-size:.88rem;color:var(--muted)">'+escapeHtml(String((l&&l.erklaerung)||""))+'</div></div>';}).join("")):"";
+  var bg=(Array.isArray(rc.begriffe)&&rc.begriffe.length)?('<div class="acclabel accsep">📖 Begriffe einfach erklärt</div>'+rc.begriffe.map(function(b){return '<div class="errrow"><div style="font-size:.87rem;font-weight:600">'+escapeHtml(String((b&&b.begriff)||"?"))+'</div><div style="font-size:.88rem;color:var(--muted)">'+escapeHtml(String((b&&b.erklaerung)||""))+'</div></div>';}).join("")):"";
+  var auf=(Array.isArray(rc.auffaellig)&&rc.auffaellig.length)?('<div class="ainote" style="background:color-mix(in srgb,#d97706 9%,transparent);border-color:#d97706">⚠️ <b>Auffälligkeiten:</b><ul class="wichtig" style="margin:4px 0 0">'+rc.auffaellig.map(function(a){return '<li>'+escapeHtml(String(a))+'</li>';}).join("")+'</ul></div>'):"";
+  var erst=rc.erstattung?'<div class="ainote">💶 '+escapeHtml(String(rc.erstattung))+'</div>':"";
+  var qs=(Array.isArray(rc.quellen)&&rc.quellen.length)?'<p class="muted" style="font-size:.8rem;margin-top:8px">Quellen: '+rc.quellen.slice(0,5).map(function(q){var u=String((q&&q.url)||"");var t=String((q&&q.titel)||u||"Quelle");if(!/^https?:\/\//i.test(u))return escapeHtml(t);return '<a href="'+escapeHtml(u)+'" target="_blank" rel="noopener">'+escapeHtml(t)+'</a>';}).join(" · ")+'</p>':"";
+  return '<section class="card"><h2 class="sect">🔍 Verständlich erklärt</h2>'+
+    '<p class="muted" style="font-size:.8rem;margin:0 0 8px">Stand '+fmtDate(String(d.med_recherche_am||"").slice(0,10))+' · KI-Recherche mit Internetsuche – ersetzt keine ärztliche oder rechtliche Beratung.</p>'+
+    (rc.erklaerung?'<p style="font-size:.95rem">'+escapeHtml(String(rc.erklaerung))+'</p>':"")+
+    le+bg+auf+erst+
+    (rc.hinweise?'<div class="ainote">💡 '+escapeHtml(String(rc.hinweise))+'</div>':"")+
+    qs+
+    '<div class="btnrow"><button class="ghost" data-action="med-research" data-id="'+d.id+'">🔄 Neu erklären lassen</button></div>'+
+  '</section>';
 }
 /* Medizin-Review-Karte (statt Vertrags-Review) */
 function medReviewCard(rd,ext){
@@ -3164,6 +3224,7 @@ function onAppClick(e){
   else if(act==="clear-upload-target"){uploadTarget=null;renderApp();}
   else if(act==="med-edit"){medEditId=id;if(reviewDoc&&reviewDoc.id===id)reviewDoc=null;activeView="med-form";renderApp();window.scrollTo({top:0,behavior:"smooth"});}
   else if(act==="med-save")onSaveMed();
+  else if(act==="med-research")medResearch(id);
   else if(act==="med-tovertrag")fromMedical(id);
   else if(act==="review-med-done"){reviewDoc=null;go("gesundheit");toast("Im Gesundheitsbereich abgelegt ✅");}
   else if(act==="cancel-import")cancelImport();
