@@ -160,7 +160,7 @@ textarea{min-height:74px;resize:vertical}
 .dicon{width:36px;height:36px;border-radius:9px;background:var(--panel2);display:grid;place-items:center;font-size:1.05rem;flex:none;margin-top:2px}
 .dbody{flex:1;min-width:0}
 .dname{font-weight:600;font-size:.92rem;overflow-wrap:anywhere}
-.dsum{font-size:.85rem;color:var(--muted);margin-top:2px}
+.dsum{font-size:.85rem;color:var(--muted);margin-top:2px;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 .dmeta{font-size:.78rem;color:var(--muted2);margin-top:3px;display:flex;gap:10px;flex-wrap:wrap;align-items:center}
 .dact{display:flex;flex-direction:column;gap:6px;flex:none}
 .dact button{font-size:.8rem;padding:6px 10px}
@@ -183,7 +183,8 @@ textarea{min-height:74px;resize:vertical}
 .wichtig li{margin:3px 0}
 
 /* ---- Personen / Mandanten ---- */
-.personbar{display:flex;gap:8px;overflow-x:auto;padding:2px 0 12px;margin:0 0 4px;-webkit-overflow-scrolling:touch}
+.personbar{display:flex;gap:8px;padding:2px 0 12px;margin:0 0 4px}
+.personsel{width:auto;max-width:280px;font-weight:600;padding:9px 12px}
 .pchip{flex:none;display:inline-flex;align-items:center;gap:7px;padding:7px 13px;border:1px solid var(--border);border-radius:99px;background:var(--panel);color:var(--fg);font:inherit;font-size:.85rem;font-weight:500;cursor:pointer;white-space:nowrap}
 .pchip:hover{background:var(--panel2)}
 .pchip.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);font-weight:600}
@@ -221,7 +222,7 @@ textarea{min-height:74px;resize:vertical}
 body.dark .badge.fach{color:#67e8f9}
 .medfilter{display:flex;gap:8px;flex-wrap:wrap;margin-bottom:12px}
 .medfilter select{width:auto;flex:1;min-width:150px}
-.behnote{font-size:.85rem;color:var(--muted);margin-top:2px;font-style:italic}
+.behnote{font-size:.85rem;color:var(--muted);margin-top:2px;font-style:italic;display:-webkit-box;-webkit-line-clamp:2;-webkit-box-orient:vertical;overflow:hidden}
 
 /* ---- Butler-Tipps / Kosten-Aufschlüsselung ---- */
 .tiprow{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:10px 4px;border-bottom:1px solid var(--border);font-size:.9rem}
@@ -343,6 +344,9 @@ body.modal-open{overflow:hidden}
  .bottomnav{display:flex;position:fixed;left:0;right:0;bottom:0;background:color-mix(in srgb,var(--panel) 88%,transparent);backdrop-filter:blur(12px);-webkit-backdrop-filter:blur(12px);border-top:1px solid var(--border);z-index:30;padding:4px 6px calc(4px + env(safe-area-inset-bottom))}
  .bottomnav .tab{flex-direction:column;gap:2px;font-size:.68rem;padding:7px 2px;align-items:center;text-align:center;border-radius:10px}
  .bottomnav .tab .tcon{font-size:1.25rem;width:auto;height:auto}
+ .bottomnav .navadd{color:var(--accent);font-weight:650;overflow:visible}
+ .bottomnav .navadd .tcon{width:50px;height:50px;border-radius:50%;background:var(--accent);color:#fff;display:grid;place-items:center;font-size:1.55rem;margin-top:-26px;border:3px solid var(--bg);box-shadow:0 6px 18px -6px color-mix(in srgb,var(--accent) 65%,transparent)}
+ .bottomnav .navadd:hover,.bottomnav .navadd.active{background:none}
 }
 @media(max-width:560px){
  .pagetitle{display:none}
@@ -402,7 +406,7 @@ body.modal-open{overflow:hidden}
         <div class="gresults" id="gResults" hidden></div>
       </div>
       <div class="topactions">
-        <button class="iconchip" id="themeBtn" title="Hell/Dunkel">🌙</button>
+        <button class="iconchip" id="kontoBtn" title="Konto &amp; Einstellungen">⚙️</button>
       </div>
     </div>
     <main id="app"></main>
@@ -665,11 +669,11 @@ function personBadge(id){
 }
 function personBar(){
   if(PERSONS.length<1)return "";
-  var chips='<button class="pchip'+(activePerson===""?" on":"")+'" data-action="pfilter" data-id=""><span class="pdot" style="background:var(--muted2)"></span>Alle</button>';
-  chips+=PERSONS.map(function(p){
-    return '<button class="pchip'+(activePerson===p.id?" on":"")+'" data-action="pfilter" data-id="'+p.id+'"><span class="pdot" style="background:'+personColor(p)+'"></span>'+escapeHtml(p.name)+'</button>';
+  /* kompakt: Dropdown statt Chip-Leiste – die aktuelle Auswahl ist immer sichtbar */
+  var opts='<option value="">👥 Alle Personen</option>'+PERSONS.map(function(p){
+    return '<option value="'+p.id+'"'+(activePerson===p.id?" selected":"")+'>👤 '+escapeHtml(p.name)+'</option>';
   }).join("");
-  return '<div class="personbar">'+chips+'</div>';
+  return '<div class="personbar"><select id="personSel" class="personsel" title="Nach Person filtern">'+opts+'</select></div>';
 }
 function filterPerson(list){
   if(!activePerson)return list;
@@ -1197,9 +1201,9 @@ function importSummaryCard(){
     var notes=(r.notes&&r.notes.length)?'<div class="behnote">⚠️ '+r.notes.map(escapeHtml).join(" · ")+'</div>':"";
     return '<div class="docrow"><span class="dicon">'+(r.icon||"📄")+'</span><div class="dbody"><div class="dname">'+escapeHtml(r.name)+'</div><div class="dsum">'+escapeHtml(r.text)+'</div>'+notes+'</div><div class="dact">'+act+'</div></div>';
   }).join("");
-  var guthabenNote=kiGuthabenHit?'<div class="ainote" style="background:color-mix(in srgb,#dc2626 8%,transparent);border-color:#dc2626">⚠️ Das <b>KI-Guthaben ist aufgebraucht</b>. Betroffene Dokumente sind gespeichert, aber noch nicht ausgelesen. Sobald wieder Guthaben da ist, kannst du die Analyse mit einem Klick nachholen (Hinweis erscheint auf der Übersicht und beim Dokument).</div>':"";
+  var guthabenNote=kiGuthabenHit?'<div class="ainote" style="background:color-mix(in srgb,#dc2626 8%,transparent);border-color:#dc2626">⚠️ <b>KI-Guthaben aufgebraucht</b> – Dokumente sind gespeichert, Analyse später per Klick nachholbar.</div>':"";
   return '<section class="card"><h2 class="sect">✅ Automatisch einsortiert</h2>'+
-    '<p class="muted" style="font-size:.9rem;margin-bottom:8px">Der Butler hat '+importResults.length+' Dokument'+(importResults.length===1?"":"e")+' gelesen und passend einsortiert. Passt etwas nicht? Tippe auf „anpassen".</p>'+
+    '<p class="muted" style="font-size:.9rem;margin-bottom:8px">Passt etwas nicht? Tippe auf „anpassen".</p>'+
     guthabenNote+
     items+
     '<div class="btnrow"><button class="primary" data-action="import-more">➕ Weitere hochladen</button><button class="ghost" data-nav="dashboard">Fertig</button></div></section>';
@@ -1562,7 +1566,9 @@ function renderTabs(){
   var items=navItem("dashboard","Übersicht","🏠")+navItem("contracts","Verträge","📑")+navItem("gesundheit","Gesundheit","🩺")+navItem("docs","Dokumente","📁")+navItem("add","Hinzufügen","➕");
   var t=$("#tabs");if(t)t.innerHTML=items;
   var f=$("#tabsFoot");if(f)f.innerHTML=navItem("settings","Einstellungen","⚙️");
-  var m=$("#tabsMobile");if(m)m.innerHTML=navItem("dashboard","Start","🏠")+navItem("contracts","Verträge","📑")+navItem("gesundheit","Gesundheit","🩺")+navItem("add","Neu","➕")+navItem("docs","Doku","📁")+navItem("settings","Konto","⚙️");
+  var m=$("#tabsMobile");if(m)m.innerHTML=navItem("dashboard","Start","🏠")+navItem("contracts","Verträge","📑")+
+    '<button class="tab navadd'+("add"===activeView?" active":"")+'" data-nav="add"><span class="tcon">➕</span>Neu</button>'+
+    navItem("gesundheit","Gesundheit","🩺")+navItem("docs","Doku","📁");
   var titles={dashboard:"Übersicht",contracts:"Verträge","contract-detail":"Vertrag","contract-form":(editId?"Vertrag bearbeiten":"Neuer Vertrag"),gesundheit:"Gesundheit","med-form":"Arzt-Dokument bearbeiten",docs:"Dokumente",add:"Dokument hinzufügen",settings:"Einstellungen","ai-usage":"KI-Verbrauch"};
   var pt=$("#pageTitle");if(pt)pt.textContent=titles[activeView]||"Butler";
 }
@@ -1622,13 +1628,13 @@ function butlerTips(CS,DS){
   var tips=[];
   /* Dokumente, die auf die KI-Analyse warten (Guthaben war aufgebraucht) */
   var pend=DS.filter(function(d){return d.ki_pending;}).length;
-  if(pend)tips.push({key:"kipending:"+pend,txt:pend+(pend===1?" Dokument wartet":" Dokumente warten")+" auf die KI-Analyse (Guthaben war aufgebraucht). Sobald wieder Guthaben da ist, kannst du sie mit einem Klick auslesen lassen.",btn:"Jetzt nachholen",action:"reanalyze-all"});
+  if(pend)tips.push({key:"kipending:"+pend,txt:pend+(pend===1?" Dokument wartet":" Dokumente warten")+" auf die KI-Analyse.",btn:"Nachholen",action:"reanalyze-all"});
   CS.forEach(function(c){
     var f=fristInfo(c);
     if(c.status==="aktiv"&&f.kind==="unbekannt")
-      tips.push({key:"frist:"+c.id,txt:'Bei „'+escapeHtml(c.anbieter||"?")+'“ fehlen Vertragsbeginn oder Mindestlaufzeit – ergänze sie, dann überwacht der Butler die Kündigungsfrist.',btn:"Ergänzen",action:"edit-contract",id:c.id});
+      tips.push({key:"frist:"+c.id,txt:'„'+escapeHtml(c.anbieter||"?")+'“: Beginn/Laufzeit fehlen für die Fristen-Überwachung.',btn:"Ergänzen",action:"edit-contract",id:c.id});
     if(c.status==="gekuendigt"&&c.gekuendigt_zum&&c.gekuendigt_zum<todayISO())
-      tips.push({key:"ended:"+c.id,txt:'„'+escapeHtml(c.anbieter||"?")+'“ war zum '+fmtDate(c.gekuendigt_zum)+' gekündigt und ist inzwischen abgelaufen.',btn:"Als beendet markieren",action:"tip-ended",id:c.id});
+      tips.push({key:"ended:"+c.id,txt:'„'+escapeHtml(c.anbieter||"?")+'“ ist seit '+fmtDate(c.gekuendigt_zum)+' abgelaufen.',btn:"Beenden",action:"tip-ended",id:c.id});
   });
   /* Rechnungs-Trend: letzte Rechnung deutlich teurer als die davor */
   var trendIds={};
@@ -1639,7 +1645,7 @@ function butlerTips(CS,DS){
       var last=invs[invs.length-1].b,prev=invs[invs.length-2].b;
       if(last>prev&&(last-prev)>Math.max(1,prev*0.05)){
         trendIds[c.id]=1;
-        tips.push({key:"trend:"+c.id,txt:'Die letzte Rechnung von „'+escapeHtml(c.anbieter||"?")+'“ ist um '+fmtEur(last-prev)+' höher als die davor ('+fmtEur(prev)+' → '+fmtEur(last)+').',btn:"Verlauf ansehen",action:"open-contract",id:c.id});
+        tips.push({key:"trend:"+c.id,txt:'„'+escapeHtml(c.anbieter||"?")+'“: letzte Rechnung +'+fmtEur(last-prev)+' ('+fmtEur(prev)+' → '+fmtEur(last)+').',btn:"Verlauf",action:"open-contract",id:c.id});
       }
     }
   });
@@ -1652,14 +1658,14 @@ function butlerTips(CS,DS){
     var cur=ys[yk[yk.length-1]],prev=ys[yk[yk.length-2]];
     var aC=cur.sum/cur.n,aP=prev.sum/prev.n;
     if(aC>aP&&(aC-aP)>Math.max(1,aP*0.05))
-      tips.push({key:"year:"+c.id,txt:'„'+escapeHtml(c.anbieter||"?")+'“ kostet '+yk[yk.length-1]+' im Schnitt '+fmtEur(aC-aP)+' mehr je Rechnung als '+yk[yk.length-2]+' (⌀ '+fmtEur(aP)+' → ⌀ '+fmtEur(aC)+').',btn:"Jahresvergleich",action:"open-contract",id:c.id});
+      tips.push({key:"year:"+c.id,txt:'„'+escapeHtml(c.anbieter||"?")+'“: '+yk[yk.length-1]+' ⌀ +'+fmtEur(aC-aP)+' je Rechnung vs. '+yk[yk.length-2]+'.',btn:"Vergleich",action:"open-contract",id:c.id});
   });
   var unlinked=DS.filter(function(d){return !isMed(d)&&!d.contract_id&&["vertrag","rechnung","police","preisaenderung","kuendigung"].indexOf(d.doc_type)>=0;}).length;
-  if(unlinked)tips.push({key:"unlinked:"+unlinked,txt:unlinked+(unlinked===1?" Dokument ist":" Dokumente sind")+" noch keinem Vertrag zugeordnet – zugeordnet findet der Butler sie schneller wieder.",btn:"Ansehen",nav:"docs"});
+  if(unlinked)tips.push({key:"unlinked:"+unlinked,txt:unlinked+(unlinked===1?" Dokument":" Dokumente")+" ohne Vertrag – siehe 📌 To-Do in der Dokumentenliste.",btn:"Ansehen",nav:"docs"});
   /* Dokumente ohne Person (nur wenn es überhaupt Personen gibt) */
   if(PERSONS.length){
     var noperson=DS.filter(function(d){return !d.person_id&&(isMed(d)||["vertrag","rechnung","police"].indexOf(d.doc_type)>=0);}).length;
-    if(noperson&&!activePerson)tips.push({key:"noperson:"+noperson,txt:noperson+(noperson===1?" Dokument ist":" Dokumente sind")+" noch keiner Person zugeordnet – ordne sie zu, um klar zu trennen, wem was gehört.",btn:"Ansehen",nav:"docs"});
+    if(noperson&&!activePerson)tips.push({key:"noperson:"+noperson,txt:noperson+(noperson===1?" Dokument":" Dokumente")+" ohne Person – siehe 📌 To-Do in der Dokumentenliste.",btn:"Ansehen",nav:"docs"});
   }
   /* bereits weggeklickte Tipps ausblenden (Tipps verschwinden ohnehin automatisch, wenn erledigt) */
   tips=tips.filter(function(t){return !isTipDismissed(t.key);});
@@ -2091,6 +2097,14 @@ function yearOptions(list,cur){
   return '<option value="">Alle Jahre</option>'+yearsOf(list).map(function(j){return '<option value="'+j+'"'+(cur===j?" selected":"")+'>'+j+'</option>';}).join("");
 }
 /* ---- Dokumente ---- */
+/* Welche Angaben fehlen dem Dokument noch? (als sichtbare Badges) */
+function docGaps(d){
+  var g=[];
+  if(d.ki_pending)g.push('<span class="badge red">⏳ KI ausstehend</span>');
+  if(!isMed(d)&&!d.contract_id)g.push('<span class="badge amber">🔗 ohne Vertrag</span>');
+  if(PERSONS.length&&!d.person_id)g.push('<span class="badge amber">👤 ohne Person</span>');
+  return g;
+}
 function docRow(d){
   var t=dtInfo(d.doc_type);
   if(isMed(d))return medRow(d);
@@ -2100,7 +2114,7 @@ function docRow(d){
     '<div class="dbody" data-action="doc-open" data-id="'+d.id+'" title="Details anzeigen"><div class="dname">'+escapeHtml(docTitle(d))+'</div>'+
     (d.zusammenfassung?'<div class="dsum">'+escapeHtml(d.zusammenfassung)+'</div>':"")+
     '<div class="dmeta">'+(d.person_id?personBadge(d.person_id):"")+'<span>'+t.label+'</span>'+(kat?'<span>'+kat.icon+' '+kat.label+'</span>':"")+'<span>'+fmtDate(d.doc_date||String(d.created_at).slice(0,10))+'</span>'+
-    (c?'<span>🔗 '+escapeHtml(c.anbieter||"Vertrag")+'</span>':'<span class="muted">ohne Vertrag</span>')+'</div></div>'+
+    (c?'<span>🔗 '+escapeHtml(c.anbieter||"Vertrag")+'</span>':"")+docGaps(d).join("")+'</div></div>'+
     '<span class="rowgo">›</span></div>';
 }
 /* Zeile für ein medizinisches Dokument */
@@ -2111,7 +2125,7 @@ function medRow(d){
     '<div class="dbody" data-action="doc-open" data-id="'+d.id+'" title="Details anzeigen"><div class="dname">'+(fa?fa.icon+' ':"")+escapeHtml(d.titel||d.arzt||(fa?fa.label:"Arzt-Dokument"))+'</div>'+
     (beh?'<div class="behnote">'+escapeHtml(beh)+'</div>':(d.zusammenfassung?'<div class="dsum">'+escapeHtml(d.zusammenfassung)+'</div>':""))+
     '<div class="dmeta">'+(d.person_id?personBadge(d.person_id):"")+(fa?'<span class="badge fach">'+fa.icon+' '+fa.label+'</span>':"")+'<span>'+mt.label+'</span>'+
-    '<span>'+fmtDate(d.behandlungsdatum||d.doc_date||String(d.created_at).slice(0,10))+'</span>'+(d.betrag!=null?'<span><b>'+fmtEur(d.betrag)+'</b></span>':"")+'</div></div>'+
+    '<span>'+fmtDate(d.behandlungsdatum||d.doc_date||String(d.created_at).slice(0,10))+'</span>'+(d.betrag!=null?'<span><b>'+fmtEur(d.betrag)+'</b></span>':"")+docGaps(d).join("")+'</div></div>'+
     '<span class="rowgo">›</span></div>';
 }
 function viewDocs(){
@@ -2128,12 +2142,17 @@ function viewDocs(){
     return true;
   });
   list=sortDocs(list,docFilter.sort);
-  var rows=list.length?list.map(docRow).join(""):'<p class="muted">Keine Vertrags-/Haushaltsdokumente'+(pool.length?" für diesen Filter":"")+'. Arzt-Dokumente findest du unter 🩺 Gesundheit.</p>';
+  /* To-Do zuerst: Dokumente mit Lücken (ohne Vertrag/Person, KI ausstehend) oben in eigener Karte */
+  var todo=list.filter(function(d){return docGaps(d).length;});
+  var rest=list.filter(function(d){return !docGaps(d).length;});
+  var todoCard=todo.length?('<section class="card"><h2 class="sect">📌 To-Do <span class="muted" style="font-weight:400;font-size:.85rem">('+todo.length+' – hier fehlt noch etwas)</span></h2>'+todo.map(docRow).join("")+'</section>'):"";
+  var rows=rest.length?rest.map(docRow).join(""):(todo.length?"":'<p class="muted">Keine Vertrags-/Haushaltsdokumente'+(pool.length?" für diesen Filter":"")+'. Arzt-Dokumente findest du unter 🩺 Gesundheit.</p>');
   var aktiv=(docFilter.kat||docFilter.typ||docFilter.jahr||docFilter.q);
   return personBar()+
     '<div class="filterbar"><select id="df_kat">'+katOpts+'</select><select id="df_typ">'+typOpts+'</select><select id="df_jahr">'+yearOptions(pool,docFilter.jahr)+'</select><select id="df_sort">'+sortOptions(docFilter.sort)+'</select><input type="text" id="df_q" placeholder="🔎 Suchen …" value="'+escapeHtml(docFilter.q)+'">'+(aktiv?'<button class="ghost" data-action="df-reset">Filter zurücksetzen</button>':"")+'</div>'+
     '<p class="muted" style="font-size:.82rem;margin:0 0 10px">'+list.length+' von '+pool.length+' Dokumenten</p>'+
-    '<section class="card">'+rows+'</section>'+
+    todoCard+
+    (rows?'<section class="card">'+rows+'</section>':"")+
     '<button class="bigadd" data-nav="add">➕ &nbsp;Weiteres Dokument hinzufügen</button>';
 }
 
@@ -2292,8 +2311,8 @@ function medRechercheCard(d){
   if(!rc){
     return '<section class="card"><h2 class="sect">🔍 Verständlich erklären</h2>'+
       '<p class="muted" style="font-size:.9rem;margin:0 0 10px">'+(isRe
-        ?'Der Butler liest die Rechnung, recherchiert im Internet, was hinter den Abrechnungsziffern (GOÄ/GOZ) steckt, und erklärt dir in Alltagssprache, wofür du bezahlst – inklusive Hinweis auf Auffälligkeiten.'
-        :'Der Butler liest das Dokument, recherchiert Fachbegriffe, Diagnosen und Werte im Internet und erklärt dir in Alltagssprache, was sie bedeuten.')+'</p>'+
+        ?'Recherchiert die Abrechnungsziffern im Internet und erklärt in Alltagssprache, wofür du bezahlst.'
+        :'Recherchiert Fachbegriffe und Werte im Internet und erklärt sie in Alltagssprache.')+'</p>'+
       '<div class="btnrow"><button class="primary" data-action="med-research" data-id="'+d.id+'">🔍 '+(isRe?'Rechnung erklären lassen':'Dokument erklären lassen')+'</button></div>'+
     '</section>';
   }
@@ -2419,9 +2438,9 @@ function viewAdd(){
   var targetHint=tCon?('<div class="ainote">📎 Neue Dokumente werden dem Vertrag <b>'+katInfo(tCon.kategorie).icon+' '+escapeHtml(tCon.anbieter||"?")+(tCon.produkt?" – "+escapeHtml(tCon.produkt):"")+'</b> zugeordnet. <button class="linkbtn" data-action="clear-upload-target" style="display:inline">Nicht zuordnen</button></div>'):"";
   return review+
   '<section class="card"><h2 class="sect">➕ Dokument hinzufügen</h2>'+
-  '<p class="muted" style="margin-bottom:14px">Einfach hochladen – der Butler liest alles aus und sortiert automatisch ein. Mehrere Dateien auf einmal sind kein Problem.</p>'+
-  '<details style="margin:0 0 14px"><summary style="cursor:pointer;color:var(--accent);font-weight:600;font-size:.88rem">Was passiert beim Einlesen?</summary>'+
-  '<p class="muted" style="font-size:.88rem;margin:8px 0 0">Der Butler erkennt selbst, worum es geht: Verträge werden angelegt bzw. zugeordnet und bei den Fristen überwacht, Arztrechnungen wandern in den 🩺 Gesundheitsbereich (mit Fachrichtung, Arzt, Betrag), alles Übrige ins Archiv – jeweils mit erkannter Kategorie und Person. Danach kannst du jede Einordnung anpassen.</p></details>'+
+  '<p class="muted" style="margin-bottom:10px">Hochladen – der Butler liest aus und sortiert ein.</p>'+
+  '<details style="margin:0 0 14px"><summary style="cursor:pointer;color:var(--accent);font-weight:600;font-size:.88rem">ℹ️ Was passiert beim Einlesen?</summary>'+
+  '<p class="muted" style="font-size:.88rem;margin:8px 0 0">Der Butler erkennt selbst, worum es geht: Verträge werden angelegt bzw. zugeordnet und bei den Fristen überwacht, Arztrechnungen wandern in den 🩺 Gesundheitsbereich, alles Übrige ins Archiv – jeweils mit Kategorie und Person. Jede Einordnung ist anpassbar.</p></details>'+
   targetHint+personHint+
   '<div class="upzone">'+
    '<button class="upbtn" data-action="pick-cam"><span class="uic">📷</span>Brief fotografieren<span class="usub">Kamera öffnet sich direkt</span></button>'+
@@ -2430,7 +2449,7 @@ function viewAdd(){
   '<input type="file" id="fileCam" accept="image/*" capture="environment" hidden>'+
   '<input type="file" id="filePick" accept="application/pdf,image/*,message/rfc822,.eml" multiple hidden>'+
   '<div id="aiWork" class="aiwork" hidden><span class="spin"></span><span class="aimsg">…</span><button class="ghost" id="aiCancel" data-action="cancel-import" style="margin-left:auto;flex:none">Abbrechen</button></div>'+
-  '<p class="muted" style="font-size:.8rem;margin-top:14px">🔒 Deine Dokumente liegen verschlüsselt in deinem privaten Speicher und sind nur für deinen Haushalt sichtbar. Die KI-Analyse kostet weniger als 1 Cent pro Dokument.</p>'+
+  '<p class="muted" style="font-size:.8rem;margin-top:14px">🔒 Verschlüsselt &amp; privat – nur dein Haushalt sieht deine Dokumente.</p>'+
   '</section>';
 }
 
@@ -2461,7 +2480,7 @@ function viewSettings(){
     '<div class="hhadd"><input id="hhJoinCode" type="text" maxlength="12" placeholder="Code eingeben"><button class="ghost" data-action="hh-join">Beitreten</button></div>'+
   '</section>'+
   '<section class="card"><h2 class="sect">🧑‍🤝‍🧑 Personen / Mandanten</h2>'+
-    '<p class="muted" style="font-size:.88rem;margin-bottom:12px">Trenne Dokumente nach Person – z. B. du selbst, deine Eltern, deine Oma. Der Butler erkennt den Vertragspartner beim Einlesen und ordnet automatisch zu.</p>'+
+    '<p class="muted" style="font-size:.88rem;margin-bottom:12px">Der Butler erkennt den Vertragspartner beim Einlesen und ordnet automatisch zu.</p>'+
     (PERSONS.length?('<div class="personmgr">'+PERSONS.map(function(p){
       var nc=CONTRACTS.filter(function(c){return c.person_id===p.id;}).length,nd=DOCS.filter(function(d){return d.person_id===p.id;}).length;
       return '<div class="prow"><span class="pname"><span class="pdot" style="background:'+personColor(p)+'"></span>'+escapeHtml(p.name)+'</span><span class="muted" style="font-size:.8rem">'+nc+' Verträge · '+nd+' Dok.</span><button class="ghost" data-action="person-rename" data-id="'+p.id+'">✏️</button><button class="danger" data-action="person-del" data-id="'+p.id+'">🗑️</button></div>';
@@ -2472,6 +2491,7 @@ function viewSettings(){
     '<p class="muted" style="font-size:.9rem">Speicher belegt: <b>'+mb+'</b> ('+DOCS.length+(DOCS.length===1?" Dokument":" Dokumente")+')</p>'+
     '<div class="btnrow"><button class="ghost" data-action="export-json">⬇️ Vertragsdaten exportieren (JSON)</button></div>'+
   '</section>'+
+  themeCard()+
   modelCard()+
   aiUsageCard()+
   securityCard()+
@@ -2480,6 +2500,13 @@ function viewSettings(){
     '<p class="muted" style="font-size:.9rem;margin:10px 0 0">Kündbar zum = Vertragsbeginn + Mindestlaufzeit. Letzter Kündigungstag = dieses Datum minus Kündigungsfrist. 🔴 = weniger als 30 Tage, 🟡 = weniger als 90 Tage. Für Verträge ab dem 1. März 2022 gilt das Gesetz für faire Verbraucherverträge: Nach der Mindestlaufzeit sind sie jederzeit mit höchstens 1 Monat Frist kündbar – der Butler berücksichtigt das automatisch.</p>'+
   '</details></section>'+
   '<button class="danger" data-action="logout" style="width:100%;padding:13px">Abmelden</button>';
+}
+function themeCard(){
+  var dark=document.body.classList.contains("dark");
+  function topt(val,label,on){return '<button class="hhopt'+(on?" active":"")+'" data-action="set-theme" data-val="'+val+'"><span class="hhname">'+label+'</span><span class="hhtag">'+(on?"✓ aktiv":"wählen")+'</span></button>';}
+  return '<section class="card"><h2 class="sect">🎨 Darstellung</h2><div class="hhlist">'+
+    topt("light","☀️ Hell",!dark)+topt("dark","🌙 Dunkel",dark)+
+  '</div></section>';
 }
 function modelCard(){
   var m=modelPref();
@@ -2686,7 +2713,6 @@ function handleSession(session){
 /* ---------- Theme ---------- */
 function applyTheme(dark){
   document.body.classList.toggle("dark",!!dark);
-  var b=$("#themeBtn");if(b)b.textContent=dark?"☀️":"🌙";
   var tc=document.querySelector('meta[name="theme-color"]');if(tc)tc.setAttribute("content",dark?"#09090b":"#6366f1");
   try{localStorage.setItem("dbTheme",dark?"dark":"light");}catch(e){}
 }
@@ -2868,7 +2894,7 @@ function securityCard(){
 /* ---------- Fehlerprotokoll (Admin) ---------- */
 function errorLogCard(){
   return '<section class="card" id="errCard" hidden><h2 class="sect">🐞 Fehlerprotokoll</h2>'+
-    '<p class="muted" style="font-size:.85rem;margin-bottom:8px">Hier sammelt der Butler automatisch alle aufgetretenen Fehler (nur der Admin sieht diese Karte). Taucht etwas wiederholt auf: Text kopieren und Claude zeigen – dann wird es gemeinsam gefixt.</p>'+
+    '<p class="muted" style="font-size:.85rem;margin-bottom:8px">Automatisches Fehlerprotokoll – nur für den Admin sichtbar.</p>'+
     '<div id="errList"><p class="muted" style="font-size:.85rem">Wird geladen …</p></div>'+
     '<div class="btnrow"><button class="ghost" data-action="err-clear">🧹 Protokoll leeren</button></div>'+
   '</section>';
@@ -3005,7 +3031,7 @@ function aiUsageCard(){
     (AIUSAGE.length
       ?('<div class="acclabel accsep">Letzte Analysen</div><div class="aihist">'+hist+'</div>'+(AIUSAGE.length>5?'<button class="linkbtn" data-nav="ai-usage" style="margin-top:8px">Gesamte Liste ansehen ›</button>':""))
       :'<p class="muted" style="font-size:.85rem;margin-top:10px">Noch keine Analysen protokolliert – ab jetzt schreibt der Butler jede KI-Analyse hier mit.</p>')+
-    '<p class="muted" style="font-size:.78rem;margin-top:10px">Der Butler führt sein eigenes Verbrauchsprotokoll (das echte Anthropic-Guthaben lässt sich aus der App nicht auslesen). Kostenangaben sind Näherungswerte auf Dollar-Basis.</p>'+
+    '<details style="margin-top:10px"><summary style="cursor:pointer;color:var(--muted);font-size:.78rem">ℹ️ Hinweis zu den Zahlen</summary><p class="muted" style="font-size:.78rem;margin:6px 0 0">Eigenes Verbrauchsprotokoll des Butlers – das echte Anthropic-Guthaben lässt sich aus der App nicht auslesen. Kostenangaben sind Näherungswerte auf Dollar-Basis.</p></details>'+
   '</section>';
 }
 function aiRowHtml(u){
@@ -3320,6 +3346,7 @@ function onAppClick(e){
     try{if(abv)localStorage.setItem("db_ai_budget",abv);else localStorage.removeItem("db_ai_budget");}catch(e){}
     renderApp();toast(abv?"Monatsbudget gespeichert ✅":"Monatsbudget entfernt ✅");
   }
+  else if(act==="set-theme"){applyTheme(b.dataset.val==="dark");renderApp();}
   else if(act==="set-model")setModel(b.dataset.val);
   else if(act==="acc-change-pass")changeAccountPassword();
   else if(act==="logout")doLogout();
@@ -3348,6 +3375,7 @@ function onAppChange(e){
   else if(e.target.id==="bioToggle"){toggleBiometric(e.target.checked);}
   else if(e.target.id==="ai_fuser"){aiFilter.user=e.target.value;renderApp();}
   else if(e.target.id==="ai_fmonth"){aiFilter.month=e.target.value;renderApp();}
+  else if(e.target.id==="personSel"){activePerson=e.target.value||"";renderApp();}
 }
 function onAppInput(e){
   if(e.target.id&&e.target.id.indexOf("cf_")===0){updateFormPreview();return;}
@@ -3362,7 +3390,7 @@ function init(){
   var saved="";try{saved=localStorage.getItem("dbTheme")||"";}catch(e){}
   if(!saved)saved=(window.matchMedia&&window.matchMedia("(prefers-color-scheme: dark)").matches)?"dark":"light";
   applyTheme(saved==="dark");
-  var tb=$("#themeBtn");if(tb)tb.addEventListener("click",function(){applyTheme(!document.body.classList.contains("dark"));});
+  var kb=$("#kontoBtn");if(kb)kb.addEventListener("click",function(){go("settings");});
   var app=$("#app");
   app.addEventListener("click",onAppClick);
   app.addEventListener("change",onAppChange);
