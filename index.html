@@ -729,6 +729,7 @@ async function deleteContract(id){
 async function linkDoc(docId,contractId){
   try{
     var r=await sb.from("documents").update({contract_id:contractId||null}).eq("id",docId);if(r.error)throw r.error;
+    if(contractId)await inheritFromContract(docId,contractId);
     await loadFromDB();renderApp();toast(contractId?"Dokument zugeordnet ✅":"Zuordnung entfernt ✅");
   }catch(e){toast("Zuordnen fehlgeschlagen: "+errMsg(e),true);}
 }
@@ -791,7 +792,7 @@ async function edgeExtract(reqBody){
 async function applyExtractToDoc(docId,ext,body){
   var d=DOCS.find(function(x){return x.id===docId;});
   var pm=(ext&&ext.vertragspartner)?matchPerson(ext.vertragspartner):null;
-  var upd={extracted:ext,doc_type:(ext&&DOCTYPE[ext.docType])?ext.docType:"sonstiges",doc_date:(ext&&ext.datum)||null,zusammenfassung:(ext&&ext.zusammenfassung)||null,ki_pending:false};
+  var upd={extracted:ext,doc_type:(ext&&DOCTYPE[ext.docType])?ext.docType:"sonstiges",doc_date:(ext&&ext.datum)||null,zusammenfassung:(ext&&ext.zusammenfassung)||null,titel:extTitle(ext,d),ki_pending:false};
   if(pm)upd.person_id=pm.id;
   if(ext&&ext.istMedizin){
     upd.bereich="medizin";
@@ -986,7 +987,7 @@ async function ingest(opts){
   }
   try{
     var pm=(ext&&ext.vertragspartner)?matchPerson(ext.vertragspartner):null;
-    var upd={extracted:ext,doc_type:(ext&&DOCTYPE[ext.docType])?ext.docType:"sonstiges",doc_date:(ext&&ext.datum)||null,zusammenfassung:(ext&&ext.zusammenfassung)||null};
+    var upd={extracted:ext,doc_type:(ext&&DOCTYPE[ext.docType])?ext.docType:"sonstiges",doc_date:(ext&&ext.datum)||null,zusammenfassung:(ext&&ext.zusammenfassung)||null,titel:extTitle(ext,docRow)};
     if(pm)upd.person_id=pm.id;else if(activePerson)upd.person_id=activePerson;
     if(ext&&ext.istMedizin){
       upd.bereich="medizin";
@@ -1137,6 +1138,7 @@ async function autoFileDoc(docId,ext){
   if(!match)match=ext?findMatch(ext):null;
   if(match){
     await linkDocSilent(d.id,match.id);
+    try{await inheritFromContract(d.id,match.id);}catch(e){}
     var notes=[];
     if(ext&&ext.docType!=="rechnung"&&ext.kosten!=null&&match.kosten!=null&&Math.abs(ext.kosten-match.kosten)>=0.01)notes.push("Preis "+(ext.kosten>match.kosten?"gestiegen":"gesunken")+" auf "+fmtEur(ext.kosten)+" – im Vertrag prüfen");
     if(ext&&ext.docType==="rechnung"&&ext.betrag!=null&&match.kosten!=null&&Math.abs(ext.betrag-match.kosten)>Math.max(0.5,match.kosten*0.02))notes.push("Rechnungsbetrag weicht vom Tarif ab");
@@ -1382,6 +1384,7 @@ async function batchReconcile(){
     }
     if(!hit)continue;
     await linkDocSilent(d.id,hit.id);
+    try{await inheritFromContract(d.id,hit.id);}catch(e){}
     changed=true;
     /* Person und fehlende Stammdaten übernehmen – wie beim direkten Treffer */
     if(!hit.person_id&&d.person_id){
@@ -1405,6 +1408,45 @@ async function batchReconcile(){
 var adjustSugs=null;
 var ADJ_NUM={mindestlaufzeit_monate:1,kuendigungsfrist_monate:1,verlaengerung_monate:1,kosten:1};
 function docExtractDate(d){var e=d.extracted||{};return e.zeitraumBis||e.datum||d.doc_date||String(d.created_at).slice(0,10);}
+/* Anzeigetitel eines Dokuments: KI-Titel vor Dateiname */
+function docTitle(d){return (d&&d.titel)||(d&&d.filename)||"Dokument";}
+function monYY(iso){if(!iso)return "";var p=String(iso).slice(0,7).split("-");return p.length===2?(" "+p[1]+"/"+p[0]):"";}
+/* Titel aus der KI-Extraktion – mit Fallback aus den erkannten Feldern */
+function extTitle(ext,d){
+  var t=(ext&&ext.titel)?String(ext.titel).trim():"";
+  if(t)return t.slice(0,80);
+  if(ext&&ext.istMedizin){
+    var mt=medTypInfo((ext.medTyp&&MEDTYP[ext.medTyp])?ext.medTyp:"sonstiges").label;
+    var who=ext.arzt||fachInfo((ext.fachrichtung&&FACH[ext.fachrichtung])?ext.fachrichtung:"sonstiges").label;
+    return (who+" – "+mt+monYY(ext.datum)).slice(0,80);
+  }
+  if(!ext||(!ext.anbieter&&!ext.docType))return (d&&d.filename)||"Dokument";
+  var dt=dtInfo((ext.docType&&DOCTYPE[ext.docType])?ext.docType:"sonstiges").label;
+  return (((ext.anbieter?ext.anbieter+" – ":""))+dt+monYY(ext.datum)).slice(0,80);
+}
+/* Vererbung: ein Dokument, das an einen Vertrag gehängt wird, erbt dessen
+   Person, Kategorie und Anbieter – aber nur, wo dem Dokument selbst die Info fehlt. */
+async function inheritFromContract(docId,contractId){
+  try{
+    var d=DOCS.find(function(x){return x.id===docId;});var c=contractById(contractId);
+    if(!d||!c||isMed(d))return;
+    var upd={};
+    if(!d.person_id&&c.person_id)upd.person_id=c.person_id;
+    var ext=d.extracted||null;
+    var needKat=c.kategorie&&(!ext||!ext.kategorie||ext.kategorie==="sonstiges")&&c.kategorie!=="sonstiges";
+    var needAnb=c.anbieter&&(!ext||!ext.anbieter);
+    if(needKat||needAnb){
+      var ne=Object.assign({},ext||{});
+      if(needKat)ne.kategorie=c.kategorie;
+      if(needAnb)ne.anbieter=c.anbieter;
+      upd.extracted=ne;
+    }
+    if(!d.titel&&c.anbieter){
+      upd.titel=(c.anbieter+" – "+dtInfo(d.doc_type||"sonstiges").label+monYY(d.doc_date||String(d.created_at).slice(0,10))).slice(0,80);
+    }
+    if(Object.keys(upd).length)await sb.from("documents").update(upd).eq("id",docId);
+  }catch(e){}
+}
 function contractAdjustSugs(c){
   var docs=DOCS.filter(function(d){return d.contract_id===c.id&&d.extracted;})
     .sort(function(a,b){return String(docExtractDate(b)).localeCompare(String(docExtractDate(a)));});
@@ -1886,7 +1928,7 @@ function invoiceHistory(c){
       var arrow=d>0.005?"▲":(d<-0.005?"▼":"■");
       delta='<span class="invdelta '+cls+'">'+arrow+" "+fmtEur(Math.abs(d))+'</span>';
     }
-    return '<div class="invrow"><div class="invp"><div class="invper">'+escapeHtml(per)+'</div><div class="invd">'+escapeHtml(i.doc.filename||"Rechnung")+'</div></div>'+
+    return '<div class="invrow"><div class="invp"><div class="invper">'+escapeHtml(per)+'</div><div class="invd">'+escapeHtml(docTitle(i.doc))+'</div></div>'+
       '<div class="invb">'+(i.betrag!=null?fmtEur(i.betrag):"–")+delta+'</div>'+
       '<button class="ghost" data-action="doc-view" data-id="'+i.doc.id+'" style="flex:none;font-size:.8rem;padding:6px 10px">👁️</button></div>';
   }).join("");
@@ -2055,7 +2097,7 @@ function docRow(d){
   var c=d.contract_id?contractById(d.contract_id):null;
   var kat=(d.extracted&&d.extracted.kategorie)?katInfo(d.extracted.kategorie):null;
   return '<div class="docrow"><span class="dicon">'+t.icon+'</span>'+
-    '<div class="dbody" data-action="doc-open" data-id="'+d.id+'" title="Details anzeigen"><div class="dname">'+escapeHtml(d.filename||"Dokument")+'</div>'+
+    '<div class="dbody" data-action="doc-open" data-id="'+d.id+'" title="Details anzeigen"><div class="dname">'+escapeHtml(docTitle(d))+'</div>'+
     (d.zusammenfassung?'<div class="dsum">'+escapeHtml(d.zusammenfassung)+'</div>':"")+
     '<div class="dmeta">'+(d.person_id?personBadge(d.person_id):"")+'<span>'+t.label+'</span>'+(kat?'<span>'+kat.icon+' '+kat.label+'</span>':"")+'<span>'+fmtDate(d.doc_date||String(d.created_at).slice(0,10))+'</span>'+
     (c?'<span>🔗 '+escapeHtml(c.anbieter||"Vertrag")+'</span>':'<span class="muted">ohne Vertrag</span>')+'</div></div>'+
@@ -2066,7 +2108,7 @@ function medRow(d){
   var mt=medTypInfo(d.med_typ),fa=d.fachrichtung?fachInfo(d.fachrichtung):null;
   var beh=(d.extracted&&d.extracted.behandlung)?d.extracted.behandlung:"";
   return '<div class="docrow"><span class="dicon">'+mt.icon+'</span>'+
-    '<div class="dbody" data-action="doc-open" data-id="'+d.id+'" title="Details anzeigen"><div class="dname">'+(fa?fa.icon+' ':"")+escapeHtml(d.arzt||(fa?fa.label:"Arzt-Dokument"))+'</div>'+
+    '<div class="dbody" data-action="doc-open" data-id="'+d.id+'" title="Details anzeigen"><div class="dname">'+(fa?fa.icon+' ':"")+escapeHtml(d.titel||d.arzt||(fa?fa.label:"Arzt-Dokument"))+'</div>'+
     (beh?'<div class="behnote">'+escapeHtml(beh)+'</div>':(d.zusammenfassung?'<div class="dsum">'+escapeHtml(d.zusammenfassung)+'</div>':""))+
     '<div class="dmeta">'+(d.person_id?personBadge(d.person_id):"")+(fa?'<span class="badge fach">'+fa.icon+' '+fa.label+'</span>':"")+'<span>'+mt.label+'</span>'+
     '<span>'+fmtDate(d.behandlungsdatum||d.doc_date||String(d.created_at).slice(0,10))+'</span>'+(d.betrag!=null?'<span><b>'+fmtEur(d.betrag)+'</b></span>':"")+'</div></div>'+
@@ -2082,7 +2124,7 @@ function viewDocs(){
     if(docFilter.typ&&d.doc_type!==docFilter.typ)return false;
     if(docFilter.kat&&!(d.extracted&&d.extracted.kategorie===docFilter.kat))return false;
     if(docFilter.jahr&&docYear(d)!==docFilter.jahr)return false;
-    if(docFilter.q){var q=docFilter.q.toLowerCase();var hay=((d.filename||"")+" "+(d.zusammenfassung||"")+" "+JSON.stringify(d.extracted||{})).toLowerCase();if(hay.indexOf(q)<0)return false;}
+    if(docFilter.q){var q=docFilter.q.toLowerCase();var hay=((d.titel||"")+" "+(d.filename||"")+" "+(d.zusammenfassung||"")+" "+JSON.stringify(d.extracted||{})).toLowerCase();if(hay.indexOf(q)<0)return false;}
     return true;
   });
   list=sortDocs(list,docFilter.sort);
@@ -2149,6 +2191,7 @@ function viewMedForm(){
   return '<button class="linkbtn" data-nav="gesundheit" style="margin-bottom:12px">← Zurück zur Gesundheit</button>'+
   '<section class="card"><h2 class="sect">✏️ Arzt-Dokument bearbeiten</h2>'+
   '<p class="muted" style="margin-bottom:6px">Datei: '+escapeHtml(d.filename||"–")+'</p>'+
+  '<label class="f">Titel</label><input type="text" id="mf_e_titel" value="'+escapeHtml(d.titel||"")+'" placeholder="z. B. Hautarzt Dr. Meier – Rechnung 07/2026">'+
   '<div class="formrow">'+
    '<div><label class="f">Fachrichtung</label><select id="mf_e_fach">'+fachOpts+'</select></div>'+
    personField+
@@ -2174,6 +2217,7 @@ async function onSaveMed(){
   var ext=Object.assign({},d.extracted||{});ext.behandlung=beh||null;
   var cols={
     bereich:"medizin",
+    titel:($("#mf_e_titel")&&($("#mf_e_titel").value||"").trim())||null,
     fachrichtung:$("#mf_e_fach").value||"sonstiges",
     arzt:($("#mf_e_arzt").value||"").trim()||null,
     med_typ:$("#mf_e_typ").value||"sonstiges",
@@ -3037,7 +3081,7 @@ function openDocDetail(id){
   '</div>';
   var wichtig=(Array.isArray(ext.wichtig)&&ext.wichtig.length)?'<ul class="wichtig">'+ext.wichtig.map(function(w){return '<li>'+escapeHtml(w)+'</li>';}).join("")+'</ul>':"";
   var pendNote=d.ki_pending?'<div class="ainote" style="background:color-mix(in srgb,#dc2626 8%,transparent);border-color:#dc2626">⏳ Dieses Dokument wartet noch auf die KI-Analyse (Guthaben war aufgebraucht). <button class="linkbtn" data-action="reanalyze-doc" data-id="'+d.id+'" style="display:inline">Jetzt nachholen</button></div>':"";
-  openModal('<h2 class="sect">'+t.icon+' '+escapeHtml(d.filename||"Dokument")+'</h2>'+
+  openModal('<h2 class="sect">'+t.icon+' '+escapeHtml(docTitle(d))+'</h2>'+
     pendNote+
     (d.zusammenfassung?'<p style="margin:4px 0 8px">'+escapeHtml(d.zusammenfassung)+'</p>':"")+
     wichtig+(ext.hinweise?'<div class="ainote">💡 '+escapeHtml(ext.hinweise)+'</div>':"")+rows+
@@ -3085,7 +3129,8 @@ function openDocEdit(id){
   var katOpts='<option value="">— keine —</option>'+Object.keys(KAT).map(function(k){return '<option value="'+k+'"'+(k===kat?" selected":"")+'>'+KAT[k].icon+' '+KAT[k].label+'</option>';}).join("");
   var personOpts='<option value="">— keine —</option>'+PERSONS.map(function(p){return '<option value="'+p.id+'"'+(p.id===(d.person_id||"")?" selected":"")+'>'+escapeHtml(p.name)+'</option>';}).join("");
   openModal('<h2 class="sect">✏️ Dokument bearbeiten</h2>'+
-   '<label class="f">Name / Titel</label><input type="text" id="de_name" value="'+escapeHtml(d.filename||"")+'">'+
+   '<label class="f">Titel</label><input type="text" id="de_name" value="'+escapeHtml(d.titel||d.filename||"")+'">'+
+   '<p class="muted" style="font-size:.78rem;margin:4px 0 0">Datei: '+escapeHtml(d.filename||"–")+'</p>'+
    '<div class="formrow">'+
    '<div><label class="f">Art</label><select id="de_typ">'+typOpts+'</select></div>'+
    '<div><label class="f">Kategorie</label><select id="de_kat">'+katOpts+'</select></div>'+
@@ -3103,7 +3148,7 @@ async function saveDocEdit(id){
   var ext=Object.assign({},d.extracted||{});
   ext.kategorie=$("#de_kat").value||null;
   var cols={
-    filename:($("#de_name").value||"").trim()||d.filename,
+    titel:($("#de_name").value||"").trim()||null,
     doc_type:$("#de_typ").value||"sonstiges",
     doc_date:$("#de_datum").value||null,
     person_id:$("#de_person").value||null,
@@ -3157,9 +3202,9 @@ function gsRun(){
   });
   DOCS.forEach(function(d){
     var e=d.extracted||{};
-    if(hit(d.filename)||hit(d.zusammenfassung)||hit(d.arzt)||hit(d.note)||hit(e.anbieter)||hit(e.kundennummer)||hit(e.vertragsnummer)||hit(e.behandlung)){
-      if(isMed(d))vm.push({icon:fachInfo(d.fachrichtung||"sonstiges").icon,t:d.arzt||fachInfo(d.fachrichtung||"sonstiges").label,s:medTypInfo(d.med_typ).label+" · "+fmtDate(d.behandlungsdatum||d.doc_date||String(d.created_at).slice(0,10))+(d.betrag!=null?" · "+fmtEur(d.betrag):""),type:"med",id:d.id});
-      else vd.push({icon:dtInfo(d.doc_type).icon,t:d.filename||"Dokument",s:dtInfo(d.doc_type).label+" · "+fmtDate(d.doc_date||String(d.created_at).slice(0,10)),type:"doc",id:d.id});
+    if(hit(d.titel)||hit(d.filename)||hit(d.zusammenfassung)||hit(d.arzt)||hit(d.note)||hit(e.anbieter)||hit(e.kundennummer)||hit(e.vertragsnummer)||hit(e.behandlung)){
+      if(isMed(d))vm.push({icon:fachInfo(d.fachrichtung||"sonstiges").icon,t:d.titel||d.arzt||fachInfo(d.fachrichtung||"sonstiges").label,s:medTypInfo(d.med_typ).label+" · "+fmtDate(d.behandlungsdatum||d.doc_date||String(d.created_at).slice(0,10))+(d.betrag!=null?" · "+fmtEur(d.betrag):""),type:"med",id:d.id});
+      else vd.push({icon:dtInfo(d.doc_type).icon,t:docTitle(d),s:dtInfo(d.doc_type).label+" · "+fmtDate(d.doc_date||String(d.created_at).slice(0,10)),type:"doc",id:d.id});
     }
   });
   PERSONS.forEach(function(p){if(hit(p.name))vp.push({icon:"👤",t:p.name,s:"Person – tippen zum Filtern",type:"person",id:p.id});});
