@@ -183,8 +183,11 @@ textarea{min-height:74px;resize:vertical}
 .wichtig li{margin:3px 0}
 
 /* ---- Personen / Mandanten ---- */
-.personbar{display:flex;gap:8px;padding:2px 0 12px;margin:0 0 4px}
+.personbar{display:flex;align-items:center;gap:8px;padding:2px 0 12px;margin:0 0 4px}
+.pseldot{width:13px;height:13px;border-radius:50%;flex:none;box-shadow:0 0 0 3px color-mix(in srgb,var(--fg) 6%,transparent)}
 .personsel{width:auto;max-width:280px;font-weight:600;padding:9px 12px}
+/* To-Do: kompakte Schnellzuweisung je Zeile */
+.todopers{width:auto;min-width:120px;font-size:.82rem;padding:6px 8px}
 .pchip{flex:none;display:inline-flex;align-items:center;gap:7px;padding:7px 13px;border:1px solid var(--border);border-radius:99px;background:var(--panel);color:var(--fg);font:inherit;font-size:.85rem;font-weight:500;cursor:pointer;white-space:nowrap}
 .pchip:hover{background:var(--panel2)}
 .pchip.on{border-color:var(--accent);background:color-mix(in srgb,var(--accent) 12%,transparent);color:var(--accent);font-weight:600}
@@ -621,21 +624,23 @@ function icsDownload(c){
 function icsEsc(s){return String(s).replace(/\\/g,"\\\\").replace(/;/g,"\\;").replace(/,/g,"\\,").replace(/\n/g,"\\n");}
 
 /* ---------- Datenzugriff ---------- */
-async function loadFromDB(){
+async function loadFromDB(light){
   if(!activeHousehold){CONTRACTS=[];DOCS=[];PERSONS=[];AIUSAGE=[];return;}
-  /* alle Tabellen parallel laden (eine Runde statt vier) */
-  var res=await Promise.all([
+  /* alle Tabellen parallel laden (eine Runde statt vier). light=true überspringt das
+     Verbrauchsprotokoll – im Batch-Import (autoFileDoc) wird es nicht gebraucht. */
+  var q=[
     sb.from("persons").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:true}),
     sb.from("contracts").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:false}),
-    sb.from("documents").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:false}),
-    sb.from("ai_usage").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:false}).limit(300)
-  ]);
+    sb.from("documents").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:false})
+  ];
+  if(!light)q.push(sb.from("ai_usage").select("*").eq("household_id",activeHousehold).order("created_at",{ascending:false}).limit(300));
+  var res=await Promise.all(q);
   PERSONS=(res[0]&&!res[0].error&&res[0].data)?res[0].data:[];
   if(res[1].error)throw res[1].error;
   CONTRACTS=res[1].data||[];
   if(res[2].error)throw res[2].error;
   DOCS=res[2].data||[];
-  AIUSAGE=(res[3]&&!res[3].error&&res[3].data)?res[3].data:[];
+  if(!light)AIUSAGE=(res[3]&&!res[3].error&&res[3].data)?res[3].data:[];
   if(activePerson&&!PERSONS.some(function(p){return p.id===activePerson;}))activePerson="";
   lastLoad=Date.now();
 }
@@ -673,7 +678,9 @@ function personBar(){
   var opts='<option value="">👥 Alle Personen</option>'+PERSONS.map(function(p){
     return '<option value="'+p.id+'"'+(activePerson===p.id?" selected":"")+'>👤 '+escapeHtml(p.name)+'</option>';
   }).join("");
-  return '<div class="personbar"><select id="personSel" class="personsel" title="Nach Person filtern">'+opts+'</select></div>';
+  var cur=activePerson?personById(activePerson):null;
+  var dot='<span class="pseldot" style="background:'+(cur?personColor(cur):"var(--muted2)")+'"></span>';
+  return '<div class="personbar">'+dot+'<select id="personSel" class="personsel" title="Nach Person filtern">'+opts+'</select></div>';
 }
 function filterPerson(list){
   if(!activePerson)return list;
@@ -1129,7 +1136,7 @@ function detailsFromExt(ext){
 }
 /* Automatisch einsortieren: Medizin→Gesundheit, Vertrag→verknüpfen/neu anlegen, sonst Archiv */
 async function autoFileDoc(docId,ext){
-  try{await loadFromDB();}catch(e){}
+  try{await loadFromDB(true);}catch(e){}
   var d=DOCS.find(function(x){return x.id===docId;});
   var name=(d&&d.filename)||"Dokument";
   if(!d)return {name:name,icon:"📄",text:"abgelegt",view:"docs"};
@@ -2136,6 +2143,30 @@ function docGaps(d){
   if(PERSONS.length&&docNeedsPerson(d)&&!d.person_id)g.push('<span class="badge amber">👤 ohne Person</span>');
   return g;
 }
+/* Schnellzuweisung im To-Do: Person-Dropdown + Vertrag-Button direkt in der Zeile */
+function todoAssignHtml(d){
+  var h="";
+  if(docNeedsPerson(d)&&PERSONS.length&&!d.person_id){
+    var o='<option value="">👤 Person …</option>'+PERSONS.map(function(p){return '<option value="'+p.id+'">'+escapeHtml(p.name)+'</option>';}).join("");
+    h+='<select class="todopers" data-id="'+d.id+'" title="Person zuweisen">'+o+'</select>';
+  }
+  if(docNeedsContract(d)&&!d.contract_id)h+='<button class="ghost" data-action="doc-link" data-id="'+d.id+'" style="font-size:.8rem;padding:6px 10px">🔗 Vertrag</button>';
+  return h;
+}
+function todoRow(d){
+  var isM=isMed(d);
+  var icon=isM?medTypInfo(d.med_typ||"sonstiges").icon:dtInfo(d.doc_type).icon;
+  var acts=todoAssignHtml(d);
+  return '<div class="docrow"><span class="dicon">'+icon+'</span>'+
+    '<div class="dbody" data-action="doc-open" data-id="'+d.id+'" title="Details anzeigen"><div class="dname">'+escapeHtml(docTitle(d))+'</div>'+
+    '<div class="dmeta">'+(d.person_id?personBadge(d.person_id):"")+docGaps(d).join("")+'</div></div>'+
+    (acts?'<div class="dact">'+acts+'</div>':'<span class="rowgo">›</span>')+'</div>';
+}
+async function assignDocPerson(docId,personId){
+  try{var r=await sb.from("documents").update({person_id:personId||null}).eq("id",docId);if(r.error)throw r.error;
+    await loadFromDB();renderApp();toast(personId?"Person zugeordnet ✅":"Zuordnung entfernt");}
+  catch(e){toast("Zuordnen fehlgeschlagen: "+errMsg(e),true);}
+}
 function docRow(d){
   var t=dtInfo(d.doc_type);
   if(isMed(d))return medRow(d);
@@ -2176,7 +2207,7 @@ function viewDocs(){
   /* To-Do zuerst: Dokumente mit Lücken (ohne Vertrag/Person, KI ausstehend) oben in eigener Karte */
   var todo=list.filter(function(d){return docGaps(d).length;});
   var rest=list.filter(function(d){return !docGaps(d).length;});
-  var todoCard=todo.length?('<section class="card"><h2 class="sect">📌 To-Do <span class="muted" style="font-weight:400;font-size:.85rem">('+todo.length+' – hier fehlt noch etwas)</span></h2>'+todo.map(docRow).join("")+'</section>'):"";
+  var todoCard=todo.length?('<section class="card"><h2 class="sect">📌 To-Do <span class="muted" style="font-weight:400;font-size:.85rem">('+todo.length+' – hier fehlt noch etwas)</span></h2>'+todo.map(todoRow).join("")+'</section>'):"";
   var rows=rest.length?rest.map(docRow).join(""):(todo.length?"":'<p class="muted">Keine Vertrags-/Haushaltsdokumente'+(pool.length?" für diesen Filter":"")+'. Arzt-Dokumente findest du unter 🩺 Gesundheit.</p>');
   var aktiv=(docFilter.kat||docFilter.typ||docFilter.jahr||docFilter.q);
   return personBar()+
@@ -3383,6 +3414,7 @@ function onAppClick(e){
   else if(act==="logout")doLogout();
 }
 function onAppChange(e){
+  if(e.target.classList&&e.target.classList.contains("todopers")){assignDocPerson(e.target.dataset.id,e.target.value);return;}
   if(e.target.id==="cf_kategorie"){
     /* Kategorie gewechselt → passende Zusatzfelder zeigen (eingegebene Werte mitnehmen) */
     var box=$("#cfDetails");
