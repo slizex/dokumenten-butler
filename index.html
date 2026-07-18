@@ -1561,6 +1561,31 @@ async function reviewCreatePerson(name){
 var contractsCostSort=false,tipsExpanded=false;
 var uploadTarget=null; /* Vertrag, dem neue Uploads fest zugeordnet werden ("Dokument zu diesem Vertrag") */
 function go(view){activeView=view;if(view!=="contract-detail")detailId=null;if(view!=="contracts")contractsCostSort=false;if(view!=="add")uploadTarget=null;tipsExpanded=false;renderApp();window.scrollTo({top:0,behavior:"smooth"});}
+
+/* ---------- Zurück-Navigation (Wisch-Geste / Browser-Zurück / Android-Zurück) ----------
+   Eigener Verlauf über die besuchten Ansichten, gespiegelt in die History-API. Browser-Zurück
+   und die Android-Wisch-Geste (Capacitor backButton) laufen beide über popstate zur vorherigen
+   Ansicht – offene Dialoge/Suchergebnisse werden zuerst geschlossen. */
+var navHistory=[],navLast=null,navSuppress=false;
+function navSnap(){return {view:activeView,detailId:detailId,editId:editId,medEditId:medEditId,person:activePerson,uploadTarget:uploadTarget};}
+function navKey(s){return [s.view,s.detailId||"",s.editId||"",s.medEditId||""].join("|");}
+function navTrack(){
+  var cur=navSnap();
+  if(navLast&&!navSuppress&&navKey(navLast)!==navKey(cur)){
+    navHistory.push(navLast);
+    if(navHistory.length>60)navHistory.shift();
+    try{history.pushState({b:1},"");}catch(e){}
+  }
+  navLast=cur;
+}
+function navRestore(s){
+  navSuppress=true;
+  activePerson=s.person||"";detailId=s.detailId||null;editId=s.editId||null;
+  medEditId=s.medEditId||null;uploadTarget=s.uploadTarget||null;reviewDoc=null;
+  activeView=s.view||"dashboard";
+  renderApp();window.scrollTo({top:0,behavior:"smooth"});
+  navSuppress=false;
+}
 function navItem(v,label,icon){return '<button class="tab'+(v===activeView?" active":"")+'" data-nav="'+v+'"><span class="tcon">'+icon+'</span>'+label+'</button>';}
 function renderTabs(){
   var items=navItem("dashboard","Übersicht","🏠")+navItem("contracts","Verträge","📑")+navItem("gesundheit","Gesundheit","🩺")+navItem("docs","Dokumente","📁")+navItem("add","Hinzufügen","➕");
@@ -1586,6 +1611,7 @@ function renderApp(){
   else if(activeView==="add")app.innerHTML=viewAdd();
   else if(activeView==="settings"){app.innerHTML=viewSettings();refreshHhMeta();}
   else if(activeView==="ai-usage")app.innerHTML=viewAiUsage();
+  navTrack();
 }
 
 /* ---- Dashboard ---- */
@@ -2791,13 +2817,13 @@ function nativeInit(){
     try{App.addListener("backButton",function(){
       if(!$("#lockscreen").hidden)return;
       if(document.body.classList.contains("app-hidden"))return;
-      /* Zurück-Taste schließt zuerst offene Dialoge/Suchergebnisse, dann erst Navigation */
+      /* Zurück-Taste/Wisch: erst offene Dialoge/Suche schließen, dann über den Verlauf zurück */
       var mw=$("#modal");
       if(mw&&!mw.hidden){closeModal();return;}
       var gr=$("#gResults");
       if(gr&&!gr.hidden){gsHide();return;}
-      if(activeView!=="dashboard"){reviewDoc=null;go("dashboard");}
-      else if(App.exitApp){App.exitApp();}
+      if(navHistory.length){window.history.back();return;} /* → popstate → vorherige Ansicht */
+      if(App.exitApp){App.exitApp();}
     });}catch(e){}
     try{App.addListener("appStateChange",function(st){if(st&&st.isActive){if(pinSet()&&$("#lockscreen").hidden)showLock("verify");handleSharedIntent();refreshIfStale();}});}catch(e){}
   }
@@ -3418,6 +3444,14 @@ function init(){
   var gr=$("#gResults");if(gr)gr.addEventListener("click",function(e){var b=e.target.closest("[data-gres]");if(b)gsOpen(b.dataset.gres,b.dataset.id);});
   document.addEventListener("click",function(e){if(!e.target.closest(".gsearch"))gsHide();});
   document.addEventListener("visibilitychange",function(){if(document.visibilityState==="visible")refreshIfStale();});
+  /* Zurück-Geste / Browser-Zurück: erst Dialog/Suche schließen, sonst zur vorherigen Ansicht */
+  window.addEventListener("popstate",function(){
+    if(document.body.classList.contains("app-hidden"))return; /* nicht eingeloggt */
+    var mw=$("#modal");if(mw&&!mw.hidden){closeModal();try{history.pushState({b:1},"");}catch(e){}return;}
+    var gr=$("#gResults");if(gr&&!gr.hidden){gsHide();try{history.pushState({b:1},"");}catch(e){}return;}
+    if(navHistory.length){navRestore(navHistory.pop());return;}
+    /* nichts mehr im Verlauf: im Web verlässt der nächste Zurück-Schritt die Seite */
+  });
   document.addEventListener("keydown",function(e){
     if((e.ctrlKey||e.metaKey)&&(e.key==="k"||e.key==="K")){e.preventDefault();var g=$("#gSearch");if(g)g.focus();}
     else if(e.key==="Escape"){var mw=$("#modal");if(mw&&!mw.hidden)closeModal();}
