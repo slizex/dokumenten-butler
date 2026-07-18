@@ -1686,11 +1686,11 @@ function butlerTips(CS,DS){
     if(aC>aP&&(aC-aP)>Math.max(1,aP*0.05))
       tips.push({key:"year:"+c.id,txt:'„'+escapeHtml(c.anbieter||"?")+'“: '+yk[yk.length-1]+' ⌀ +'+fmtEur(aC-aP)+' je Rechnung vs. '+yk[yk.length-2]+'.',btn:"Vergleich",action:"open-contract",id:c.id});
   });
-  var unlinked=DS.filter(function(d){return !isMed(d)&&!d.contract_id&&["vertrag","rechnung","police","preisaenderung","kuendigung"].indexOf(d.doc_type)>=0;}).length;
+  var unlinked=DS.filter(function(d){return docNeedsContract(d)&&!d.contract_id;}).length;
   if(unlinked)tips.push({key:"unlinked:"+unlinked,txt:unlinked+(unlinked===1?" Dokument":" Dokumente")+" ohne Vertrag – siehe 📌 To-Do in der Dokumentenliste.",btn:"Ansehen",nav:"docs"});
   /* Dokumente ohne Person (nur wenn es überhaupt Personen gibt) */
   if(PERSONS.length){
-    var noperson=DS.filter(function(d){return !d.person_id&&(isMed(d)||["vertrag","rechnung","police"].indexOf(d.doc_type)>=0);}).length;
+    var noperson=DS.filter(function(d){return docNeedsPerson(d)&&!d.person_id;}).length;
     if(noperson&&!activePerson)tips.push({key:"noperson:"+noperson,txt:noperson+(noperson===1?" Dokument":" Dokumente")+" ohne Person – siehe 📌 To-Do in der Dokumentenliste.",btn:"Ansehen",nav:"docs"});
   }
   /* bereits weggeklickte Tipps ausblenden (Tipps verschwinden ohnehin automatisch, wenn erledigt) */
@@ -2124,11 +2124,16 @@ function yearOptions(list,cur){
 }
 /* ---- Dokumente ---- */
 /* Welche Angaben fehlen dem Dokument noch? (als sichtbare Badges) */
+/* Welche Dokumente SOLLTEN einem Vertrag / einer Person zugeordnet sein?
+   Gemeinsame Definition für To-Do-Badges (docGaps) UND Butler-Tipps – sonst
+   zeigt das To-Do dauerhaft Dokumente, die dort gar nicht hingehören. */
+function docNeedsContract(d){return !isMed(d)&&["vertrag","rechnung","police","preisaenderung","kuendigung"].indexOf(d.doc_type)>=0;}
+function docNeedsPerson(d){return isMed(d)||["vertrag","rechnung","police"].indexOf(d.doc_type)>=0;}
 function docGaps(d){
   var g=[];
   if(d.ki_pending)g.push('<span class="badge red">⏳ KI ausstehend</span>');
-  if(!isMed(d)&&!d.contract_id)g.push('<span class="badge amber">🔗 ohne Vertrag</span>');
-  if(PERSONS.length&&!d.person_id)g.push('<span class="badge amber">👤 ohne Person</span>');
+  if(docNeedsContract(d)&&!d.contract_id)g.push('<span class="badge amber">🔗 ohne Vertrag</span>');
+  if(PERSONS.length&&docNeedsPerson(d)&&!d.person_id)g.push('<span class="badge amber">👤 ohne Person</span>');
   return g;
 }
 function docRow(d){
