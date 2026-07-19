@@ -116,6 +116,12 @@ textarea{min-height:74px;resize:vertical}
 .kpiclick:active{transform:translateY(0)}
 .bigadd{display:flex;align-items:center;justify-content:center;gap:10px;width:100%;padding:16px;border:2px dashed var(--border2);border-radius:var(--radius);background:none;color:var(--muted);font:inherit;font-weight:600;font-size:1rem;cursor:pointer;margin-bottom:16px}
 .bigadd:hover{border-color:var(--accent);color:var(--accent);background:color-mix(in srgb,var(--accent) 5%,transparent)}
+.nextact{display:flex;align-items:center;gap:14px;background:color-mix(in srgb,var(--accent) 9%,var(--panel));border:1px solid color-mix(in srgb,var(--accent) 35%,transparent);border-radius:var(--radius);padding:14px 16px;margin:0 0 16px;box-shadow:var(--shadow-sm)}
+.nextact .naicon{font-size:1.6rem;flex:none}
+.nextact .natxt{flex:1;min-width:0;font-size:.95rem}
+.nextact .nalabel{font-size:.72rem;font-weight:700;text-transform:uppercase;letter-spacing:.05em;color:var(--accent);margin-bottom:2px}
+.nextact button{flex:none}
+@media(max-width:560px){.nextact{flex-wrap:wrap}.nextact button{width:100%}}
 
 /* ---- Fristen / Ampel ---- */
 .frow{display:flex;align-items:center;gap:12px;padding:12px 4px;border-bottom:1px solid var(--border)}
@@ -1640,7 +1646,8 @@ function viewDashboard(){
   var medsDS=DS.filter(isMed),jahrNow=todayISO().slice(0,4);
   var medJahr=medsDS.reduce(function(s,d){var dt=(d.behandlungsdatum||d.doc_date||"");return (d.betrag!=null&&String(dt).slice(0,4)===jahrNow)?s+Number(d.betrag):s;},0);
   var medKpi=medsDS.length?('<div class="kpi kpiclick" data-nav="gesundheit"><div class="klabel">Gesundheit ›</div><div class="kval">'+fmtEur(medJahr)+'</div><div class="ksub">Arztkosten '+jahrNow+'</div></div>'):"";
-  return '<button class="bigadd" data-nav="add">➕ &nbsp;Dokument hochladen oder fotografieren</button>'+
+  return nextActionCard(CS,DS)+
+    '<button class="bigadd" data-nav="add">➕ &nbsp;Dokument hochladen oder fotografieren</button>'+
     personBar()+
     '<div class="kpis">'+
       '<div class="kpi kpiclick" data-action="drill-costs"><div class="klabel">Pro Monat ›</div><div class="kval">'+fmtEur(mk)+'</div><div class="ksub">'+aktive.length+' aktive Verträge</div></div>'+
@@ -1652,6 +1659,15 @@ function viewDashboard(){
     '<section class="card"><h2 class="sect">⏰ Fristen im Blick</h2>'+fr+'</section>'+
     '<section class="card"><details><summary style="cursor:pointer;font-weight:650;font-size:1rem">🕘 Zuletzt hinzugefügt'+(DS.length?' <span class="muted" style="font-weight:400;font-size:.85rem">('+Math.min(3,DS.length)+' anzeigen)</span>':"")+'</summary><div style="margin-top:10px">'+recent+
     (DS.length>3?'<button class="linkbtn" data-nav="docs" style="margin-top:10px">Alle Dokumente ansehen ›</button>':"")+'</div></details></section>';
+}
+/* „Nächste Aktion": genau die eine dringendste Sache, prominent oben */
+function nextActionCard(CS,DS){
+  var urgent=null;
+  CS.forEach(function(c){if(c.status!=="aktiv")return;var f=fristInfo(c);if(f.days!=null&&f.days<=45&&(!urgent||f.days<urgent.days))urgent={c:c,f:f,days:f.days};});
+  var icon,txt,btn,attr;
+  if(urgent){icon=urgent.days<=14?"🔴":"⏰";txt='<b>'+escapeHtml(urgent.c.anbieter||"Vertrag")+'</b> ist nur noch <b>'+urgent.days+' Tage</b> kündbar (bis '+fmtDate(urgent.f.lastDay)+').';btn="Vertrag ansehen";attr='data-action="open-contract" data-id="'+urgent.c.id+'"';}
+  else{var pend=DS.filter(function(d){return d.ki_pending;}).length;if(!pend)return "";icon="⏳";txt='<b>'+pend+'</b> Dokument'+(pend===1?"":"e")+' warten auf die KI-Analyse.';btn="Nachholen";attr='data-action="reanalyze-all"';}
+  return '<section class="nextact"><div class="naicon">'+icon+'</div><div class="natxt"><div class="nalabel">Nächste Aktion</div>'+txt+'</div><button class="primary" '+attr+'>'+btn+'</button></section>';
 }
 /* Butler-Tipps: proaktive Hinweise, wo der User etwas tun sollte */
 function tipsDismissed(){try{return JSON.parse(localStorage.getItem("db_tips_dismissed")||"[]");}catch(e){return [];}}
@@ -1692,6 +1708,15 @@ function butlerTips(CS,DS){
     var aC=cur.sum/cur.n,aP=prev.sum/prev.n;
     if(aC>aP&&(aC-aP)>Math.max(1,aP*0.05))
       tips.push({key:"year:"+c.id,txt:'„'+escapeHtml(c.anbieter||"?")+'“: '+yk[yk.length-1]+' ⌀ +'+fmtEur(aC-aP)+' je Rechnung vs. '+yk[yk.length-2]+'.',btn:"Vergleich",action:"open-contract",id:c.id});
+  });
+  /* Tarif-Abweichung: eine Rechnung liegt spürbar über den vertraglich hinterlegten Kosten
+     (gleiche Größenordnung – kein Jahres-vs-Monats-Fehlalarm) */
+  CS.forEach(function(c){
+    if(c.status!=="aktiv"||c.kosten==null)return;
+    var invs=contractInvoices(c.id,DS);if(!invs.length)return;
+    var last=invs[invs.length-1].b,k=Number(c.kosten);
+    if(last!=null&&k>0&&last>k*1.1&&last<k*3)
+      tips.push({key:"tarifab:"+c.id+":"+Math.round(last),txt:'„'+escapeHtml(c.anbieter||"?")+'“ rechnet '+fmtEur(last)+' ab – im Tarif stehen '+fmtEur(k)+'.',btn:"Prüfen",action:"open-contract",id:c.id});
   });
   var unlinked=DS.filter(function(d){return docNeedsContract(d)&&!d.contract_id;}).length;
   if(unlinked)tips.push({key:"unlinked:"+unlinked,txt:unlinked+(unlinked===1?" Dokument":" Dokumente")+" ohne Vertrag – siehe 📌 To-Do in der Dokumentenliste.",btn:"Ansehen",nav:"docs"});
@@ -2255,10 +2280,32 @@ function viewGesundheit(){
   var kpi='<div class="kpis"><div class="kpi"><div class="klabel">Arztkosten '+jahr+'</div><div class="kval">'+fmtEur(kostenJahr)+'</div><div class="ksub">'+meds.length+' Dokumente</div></div>'+
     '<div class="kpi"><div class="klabel">Kosten gesamt</div><div class="kval">'+fmtEur(kostenGesamt)+'</div><div class="ksub">erfasst</div></div></div>';
   var aktiv=(medFilter.fach||medFilter.typ||medFilter.arzt||medFilter.jahr);
+  var hasBetrag=meds.some(function(d){return d.betrag!=null;});
   return personBar()+kpi+
+    (hasBetrag?'<div class="btnrow" style="margin:-4px 0 14px"><button class="ghost" data-action="tax-export">📄 Steuer-Übersicht (CSV)</button></div>':"")+
     '<div class="medfilter"><select id="mf_fach">'+fachOpts+'</select><select id="mf_arzt">'+arztOpts+'</select><select id="mf_typ">'+typOpts+'</select><select id="mf_jahr">'+yearOptions(meds,medFilter.jahr)+'</select><select id="mf_sort">'+sortOptions(medFilter.sort)+'</select>'+(aktiv?'<button class="ghost" data-action="mf-reset">Filter zurücksetzen</button>':"")+'</div>'+
     (filtered.length?body:'<section class="card"><p class="muted">Keine Dokumente für diesen Filter.</p></section>')+
     '<button class="bigadd" data-nav="add">➕ &nbsp;Arzt-Dokument hinzufügen</button>';
+}
+/* Steuer-Übersicht: Arztkosten je Person/Jahr als CSV (außergewöhnliche Belastungen) */
+function healthTaxExport(){
+  var meds=DOCS.filter(function(d){return isMed(d)&&d.betrag!=null;});
+  if(!meds.length){toast("Keine Arztkosten mit Betrag erfasst.",true);return;}
+  meds=meds.slice().sort(function(a,b){return String(docSortDate(a)).localeCompare(String(docSortDate(b)));});
+  function pn(id){var p=personById(id);return p?p.name:"—";}
+  function esc(s){s=String(s==null?"":s);return /[";\n]/.test(s)?'"'+s.replace(/"/g,'""')+'"':s;}
+  function eur(n){return Number(n).toFixed(2).replace(".",",");}
+  var rows=[["Jahr","Datum","Person","Arzt/Praxis","Fachrichtung","Art","Betrag (EUR)"]];
+  meds.forEach(function(d){var dt=docSortDate(d);rows.push([dt.slice(0,4),fmtDate(dt),pn(d.person_id),d.arzt||"",fachInfo(d.fachrichtung||"sonstiges").label,medTypInfo(d.med_typ||"sonstiges").label,eur(d.betrag)]);});
+  var agg={};meds.forEach(function(d){var y=docSortDate(d).slice(0,4),k=y+"|"+(d.person_id||"");if(!agg[k])agg[k]={y:y,p:d.person_id,sum:0,n:0};agg[k].sum+=Number(d.betrag);agg[k].n++;});
+  rows.push([]);rows.push(["Summen je Jahr und Person"]);rows.push(["Jahr","Person","Anzahl","Summe (EUR)"]);
+  Object.keys(agg).sort().forEach(function(k){var a=agg[k];rows.push([a.y,pn(a.p),a.n,eur(a.sum)]);});
+  var csv="﻿"+rows.map(function(r){return r.map(esc).join(";");}).join("\r\n");
+  var blob=new Blob([csv],{type:"text/csv;charset=utf-8"});
+  var a=document.createElement("a");a.href=URL.createObjectURL(blob);
+  a.download="arztkosten-steuer.csv";document.body.appendChild(a);a.click();
+  setTimeout(function(){URL.revokeObjectURL(a.href);a.remove();},400);
+  toast("Steuer-Übersicht als CSV erstellt 📄");
 }
 function viewMedForm(){
   var d=DOCS.find(function(x){return x.id===medEditId;});
@@ -3408,6 +3455,7 @@ function onAppClick(e){
     try{if(abv)localStorage.setItem("db_ai_budget",abv);else localStorage.removeItem("db_ai_budget");}catch(e){}
     renderApp();toast(abv?"Monatsbudget gespeichert ✅":"Monatsbudget entfernt ✅");
   }
+  else if(act==="tax-export")healthTaxExport();
   else if(act==="set-theme"){applyTheme(b.dataset.val==="dark");renderApp();}
   else if(act==="set-model")setModel(b.dataset.val);
   else if(act==="acc-change-pass")changeAccountPassword();
