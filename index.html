@@ -1816,6 +1816,29 @@ function fristRow(c,f){
 }
 
 /* ---- Verträge ---- */
+/* Sparcheck: größte Kostentreiber + Sparpotenzial aus der Internet-Recherche */
+function sparCard(CS){
+  var aktive=CS.filter(function(c){return c.status==="aktiv"&&c.kosten!=null;});
+  if(!aktive.length)return "";
+  function monthlyOf(val,iv){var m=INTERVALL[iv]||1;return Number(val)/m;}
+  function yearly(c){var m=monatskosten(c);return m>0?m*12:Number(c.kosten||0);}
+  var spar=0,sparN=0;
+  aktive.forEach(function(c){
+    var td=c.recherche&&c.recherche.tarifdetails;if(!td||td.kosten==null)return;
+    var cm=monthlyOf(c.kosten,c.kosten_intervall),mm=monthlyOf(td.kosten,td.kostenIntervall||c.kosten_intervall);
+    if(mm>0&&cm>0&&mm<cm&&mm>cm*0.3){spar+=(cm-mm)*12;sparN++;}
+  });
+  var top=aktive.slice().sort(function(a,b){return yearly(b)-yearly(a);}).slice(0,4);
+  var rows=top.map(function(c){
+    var td=c.recherche&&c.recherche.tarifdetails,md=td&&td.kosten;
+    var note=(md!=null&&Number(md)<Number(c.kosten))?'<span class="badge amber">Markt ~'+fmtEur(Number(md))+'</span>'
+      :(c.recherche?'<span class="badge green">recherchiert</span>':'<button class="ghost" data-action="research-contract" data-id="'+c.id+'" style="font-size:.78rem;padding:5px 10px">🌐 Vergleichen</button>');
+    return '<div style="display:flex;align-items:center;gap:10px;padding:7px 0;font-size:.88rem;border-bottom:1px solid var(--border)"><span style="flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap">'+katInfo(c.kategorie).icon+' '+escapeHtml(c.anbieter||"?")+'</span><span style="font-weight:650;flex:none">'+fmtEur(yearly(c))+'<span class="muted" style="font-weight:400">/J</span></span>'+note+'</div>';
+  }).join("");
+  var head=sparN?('<p style="font-size:.95rem;margin:0 0 8px">💡 Mögliches Sparpotenzial: <b>'+fmtEur(spar)+' / Jahr</b> <span class="muted">(laut Recherche bei '+sparN+' Vertrag'+(sparN===1?"":"en")+')</span></p>')
+    :('<p class="muted" style="font-size:.9rem;margin:0 0 8px">Deine größten Kostenpunkte – lohnt ein Vergleich? „🌐 Vergleichen" recherchiert den Markt.</p>');
+  return '<section class="card"><h2 class="sect">💡 Sparcheck</h2>'+head+rows+'</section>';
+}
 function viewContracts(){
   if(!CONTRACTS.length)return '<section class="card"><h2 class="sect">📑 Verträge</h2><p class="muted">Noch keine Verträge angelegt. Am schnellsten geht es, wenn du ein Vertrags-PDF oder einen Brief hochlädst – der Butler füllt alles aus.</p><div class="btnrow"><button class="primary" data-nav="add">➕ Dokument hochladen</button><button class="ghost" data-action="new-contract">Von Hand anlegen</button></div></section>';
   var base=filterPerson(CONTRACTS).slice();
@@ -1851,7 +1874,7 @@ function viewContracts(){
   var body=cards?('<div class="clist">'+cards+'</div>'):'<section class="card"><p class="muted">Keine Verträge für diese Person.</p></section>';
   var costBanner=contractsCostSort?('<div class="ainote" style="margin:0 0 12px">💶 Nach monatlichen Kosten sortiert (teuerste zuerst). <button class="linkbtn" data-nav="contracts" style="display:inline">Normale Ansicht</button></div>'):"";
   /* Kosten-Aufschlüsselungen leben im Kosten-Drilldown (Dashboard bleibt schlank) */
-  var costCards=contractsCostSort?(costByPerson()+costBreakdown(base)+jahresvergleichCard()):"";
+  var costCards=contractsCostSort?(sparCard(base)+costByPerson()+costBreakdown(base)+jahresvergleichCard()):"";
   return personBar()+costBanner+costCards+'<div class="btnrow" style="margin:0 0 16px"><button class="primary" data-nav="add">➕ Per Dokument</button><button class="ghost" data-action="new-contract">Von Hand anlegen</button></div>'+body;
 }
 function viewContractDetail(){
