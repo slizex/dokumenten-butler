@@ -171,6 +171,17 @@ textarea{min-height:74px;resize:vertical}
 .dact{display:flex;flex-direction:column;gap:6px;flex:none}
 .dact button{font-size:.8rem;padding:6px 10px}
 .rowgo{align-self:center;color:var(--muted2);font-size:1.35rem;padding:0 6px;flex:none}
+/* Wisch-Aktionen: Wischen deckt Buttons auf, Aktion erst per Tippen */
+.swrow{position:relative;overflow:hidden;border-bottom:1px solid var(--border)}
+.swrow:last-child{border-bottom:none}
+.swrow .swipefront{display:flex;gap:12px;align-items:flex-start;padding:13px 8px;background:var(--panel);position:relative;z-index:1;transition:transform .18s ease}
+.swrow:hover .swipefront{background:var(--panel2)}
+.swrow.swiped .swipefront{transform:translateX(-136px)}
+.swipeactions{position:absolute;top:0;right:0;bottom:0;display:flex;z-index:0}
+.swipeactions button{border:none;width:68px;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:2px;font:inherit;font-size:.7rem;font-weight:600;color:#fff;cursor:pointer}
+.swipeactions button span{font-size:.66rem}
+.swipeactions .sa-share{background:var(--accent)}
+.swipeactions .sa-assign{background:#0e7490}
 .filterbar{display:flex;gap:8px;margin-bottom:14px;flex-wrap:wrap}
 .filterbar select,.filterbar input{width:auto;flex:1;min-width:130px}
 
@@ -2215,28 +2226,37 @@ async function assignDocPerson(docId,personId){
     await loadFromDB();renderApp();toast(personId?"Person zugeordnet ✅":"Zuordnung entfernt");}
   catch(e){toast("Zuordnen fehlgeschlagen: "+errMsg(e),true);}
 }
+/* Aufgedeckte Aktionen beim Wischen: Teilen + (Zuordnen bzw. Öffnen) */
+function swipeActions(d){
+  var second=(!isMed(d)&&docNeedsContract(d)&&!d.contract_id)
+    ?'<button class="sa-assign" data-action="doc-link" data-id="'+d.id+'">🔗<span>Zuordnen</span></button>'
+    :'<button class="sa-assign" data-action="doc-open" data-id="'+d.id+'">✏️<span>Öffnen</span></button>';
+  return '<div class="swipeactions"><button class="sa-share" data-action="doc-share" data-id="'+d.id+'">📤<span>Teilen</span></button>'+second+'</div>';
+}
 function docRow(d){
   var t=dtInfo(d.doc_type);
   if(isMed(d))return medRow(d);
   var c=d.contract_id?contractById(d.contract_id):null;
   var kat=(d.extracted&&d.extracted.kategorie)?katInfo(d.extracted.kategorie):null;
-  return '<div class="docrow"><span class="dicon">'+t.icon+'</span>'+
+  var front='<div class="swipefront"><span class="dicon">'+t.icon+'</span>'+
     '<div class="dbody" data-action="doc-open" data-id="'+d.id+'" title="Details anzeigen"><div class="dname">'+escapeHtml(docTitle(d))+'</div>'+
     (d.zusammenfassung?'<div class="dsum">'+escapeHtml(d.zusammenfassung)+'</div>':"")+
     '<div class="dmeta">'+(d.person_id?personBadge(d.person_id):"")+'<span>'+t.label+'</span>'+(kat?'<span>'+kat.icon+' '+kat.label+'</span>':"")+'<span>'+fmtDate(d.doc_date||String(d.created_at).slice(0,10))+'</span>'+
     (c?'<span>🔗 '+escapeHtml(c.anbieter||"Vertrag")+'</span>':"")+docGaps(d).join("")+'</div></div>'+
     '<span class="rowgo">›</span></div>';
+  return '<div class="swrow" data-swipe="'+d.id+'">'+front+swipeActions(d)+'</div>';
 }
 /* Zeile für ein medizinisches Dokument */
 function medRow(d){
   var mt=medTypInfo(d.med_typ),fa=d.fachrichtung?fachInfo(d.fachrichtung):null;
   var beh=(d.extracted&&d.extracted.behandlung)?d.extracted.behandlung:"";
-  return '<div class="docrow"><span class="dicon">'+mt.icon+'</span>'+
+  var front='<div class="swipefront"><span class="dicon">'+mt.icon+'</span>'+
     '<div class="dbody" data-action="doc-open" data-id="'+d.id+'" title="Details anzeigen"><div class="dname">'+(fa?fa.icon+' ':"")+escapeHtml(d.titel||d.arzt||(fa?fa.label:"Arzt-Dokument"))+'</div>'+
     (beh?'<div class="behnote">'+escapeHtml(beh)+'</div>':(d.zusammenfassung?'<div class="dsum">'+escapeHtml(d.zusammenfassung)+'</div>':""))+
     '<div class="dmeta">'+(d.person_id?personBadge(d.person_id):"")+(fa?'<span class="badge fach">'+fa.icon+' '+fa.label+'</span>':"")+'<span>'+mt.label+'</span>'+
     '<span>'+fmtDate(d.behandlungsdatum||d.doc_date||String(d.created_at).slice(0,10))+'</span>'+(d.betrag!=null?'<span><b>'+fmtEur(d.betrag)+'</b></span>':"")+docGaps(d).join("")+'</div></div>'+
     '<span class="rowgo">›</span></div>';
+  return '<div class="swrow" data-swipe="'+d.id+'">'+front+swipeActions(d)+'</div>';
 }
 function viewDocs(){
   var pool=filterPerson(DOCS).filter(function(d){return !isMed(d);});
@@ -3519,6 +3539,41 @@ function onAppInput(e){
     clearTimeout(onAppInput._a);onAppInput._a=setTimeout(function(){var el=$("#ai_q");var pos=el?el.selectionStart:0;renderApp();var el2=$("#ai_q");if(el2){el2.focus();try{el2.setSelectionRange(pos,pos);}catch(_e){}}},350);}
 }
 
+/* Wisch-Gesten auf Dokumentzeilen (delegiert, nur Touch). Wischen deckt die
+   Aktions-Buttons auf – ausgelöst wird ausschließlich per Tippen. Vertikales
+   Scrollen wird nie blockiert (passive Listener, horizontale Dominanz-Schwelle). */
+function initSwipe(app){
+  var st=null;
+  app.addEventListener("touchstart",function(e){
+    var row=e.target.closest(".swrow");
+    var open=app.querySelector(".swrow.swiped");
+    if(open&&open!==row)open.classList.remove("swiped");
+    if(!row){st=null;return;}
+    var t=e.touches[0];
+    st={row:row,front:row.querySelector(".swipefront"),x0:t.clientX,y0:t.clientY,dx:0,decided:false,horiz:false,wasOpen:row.classList.contains("swiped")};
+  },{passive:true});
+  app.addEventListener("touchmove",function(e){
+    if(!st)return;
+    var t=e.touches[0],dx=t.clientX-st.x0,dy=t.clientY-st.y0;
+    if(!st.decided){
+      if(Math.abs(dx)<10&&Math.abs(dy)<10)return;
+      st.decided=true;st.horiz=Math.abs(dx)>Math.abs(dy)+4;
+      if(st.horiz)st.front.style.transition="none";else{st=null;return;}
+    }
+    if(!st.horiz)return;
+    st.dx=dx;
+    var x=Math.max(-136,Math.min(0,(st.wasOpen?-136:0)+dx));
+    st.front.style.transform="translateX("+x+"px)";
+  },{passive:true});
+  function endSwipe(){
+    if(!st)return;var s=st;st=null;
+    if(!s.horiz)return;
+    s.front.style.transition="";s.front.style.transform="";
+    s.row.classList.toggle("swiped",((s.wasOpen?-136:0)+s.dx)<-50);
+  }
+  app.addEventListener("touchend",endSwipe,{passive:true});
+  app.addEventListener("touchcancel",endSwipe,{passive:true});
+}
 /* ---------- Init ---------- */
 function init(){
   var saved="";try{saved=localStorage.getItem("dbTheme")||"";}catch(e){}
@@ -3529,6 +3584,7 @@ function init(){
   app.addEventListener("click",onAppClick);
   app.addEventListener("change",onAppChange);
   app.addEventListener("input",onAppInput);
+  initSwipe(app);
   /* Modal-Dialoge */
   var mbx=$("#modalBox");
   if(mbx){
