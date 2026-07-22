@@ -3551,6 +3551,7 @@ function initSwipe(app){
     if(!row){st=null;return;}
     var t=e.touches[0];
     st={row:row,front:row.querySelector(".swipefront"),x0:t.clientX,y0:t.clientY,dx:0,decided:false,horiz:false,wasOpen:row.classList.contains("swiped")};
+    if(!st.front){st=null;return;}
   },{passive:true});
   app.addEventListener("touchmove",function(e){
     if(!st)return;
